@@ -1,0 +1,33 @@
+[project]
+name = "voxd"
+version = "0.1.0"
+description = "Lokale Spracheingabe mit Selbstkorrektur - Linux und Windows, komplett offline"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "sherpa-onnx>=1.13",
+    "numpy>=1.24",
+    "PySide6>=6.6",
+    "sounddevice>=0.4.6",
+    "platformdirs>=4.0",
+    "tomli-w>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+voxd = "voxd.__main__:main"
+voxctl = "voxd.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voxd"]
+
+[tool.ruff]
+line-length = 96
+target-version = "py310"
