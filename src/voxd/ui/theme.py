@@ -1,14 +1,14 @@
-"""Gestaltungssystem.
+"""Design system.
 
-Bewusst eng gefasst. Die Regeln existieren, damit spaeterer Code nicht anfaengt,
-eigene Farben und Radien zu erfinden - genau daran erkennt man Oberflaechen, die
-aus vielen unabhaengigen Entscheidungen zusammengesetzt wurden.
+Deliberately narrow. These rules exist so later code does not start inventing
+its own colours and radii - that is exactly what makes an interface look like a
+pile of independent decisions rather than one design.
 
-  - Eine Akzentfarbe, sonst nur Grauwerte
-  - Drei Schriftgrade, zwei Schnitte
-  - Radius 6 px, ein einziger Schatten im ganzen Programm
-  - Abstaende auf einem 4-px-Raster
-  - Zustand ueber Helligkeit und Position, nicht ueber Signalfarben
+  - One accent colour, greys for everything else
+  - Three type sizes, two weights
+  - 6 px radius, a single shadow in the entire program
+  - Spacing on a 4 px grid
+  - State conveyed through brightness and position, not signal colours
 """
 
 from __future__ import annotations
@@ -19,16 +19,16 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Palette:
     name: str
-    bg: str          # Fensterhintergrund
-    surface: str     # erhoehte Flaeche (Karten, Eingabefelder)
-    surface_alt: str # leicht abgesetzt (Zebrastreifen, Kopfzeilen)
-    line: str        # Trennlinien, Rahmen
-    text: str        # Fliesstext
-    text_dim: str    # Nebensaechliches
-    text_faint: str  # Platzhalter, Deaktiviertes
-    accent: str      # die eine Akzentfarbe
-    accent_dim: str  # ihre ruhige Variante
-    warn: str        # ausschliesslich fuer echte Warnungen
+    bg: str          # window background
+    surface: str     # raised surface (cards, inputs)
+    surface_alt: str # slightly offset (row stripes, headers)
+    line: str        # dividers, borders
+    text: str        # body text
+    text_dim: str    # secondary
+    text_faint: str  # placeholders, disabled
+    accent: str      # the one accent colour
+    accent_dim: str  # its quiet variant
+    warn: str        # real warnings only
 
 
 DARK = Palette(
@@ -40,7 +40,7 @@ DARK = Palette(
     text="#E8E8E6",
     text_dim="#9A9A96",
     text_faint="#5E5E63",
-    accent="#C8944B",      # gedecktes Messing - kein Neonblau, kein Violett
+    accent="#C8944B",      # muted brass - no neon blue, no violet
     accent_dim="#7A5B2E",
     warn="#C4674B",
 )
@@ -59,12 +59,12 @@ LIGHT = Palette(
     warn="#A8442A",
 )
 
-# Schriftgrade: nur diese drei.
+# Type sizes: only these three.
 FONT_SM = 12
 FONT_MD = 13
 FONT_LG = 20
 
-# Abstaende: Vielfache von 4.
+# Spacing: multiples of 4.
 S1, S2, S3, S4, S5, S6 = 4, 8, 12, 16, 24, 32
 
 RADIUS = 6
@@ -72,7 +72,7 @@ RADIUS_PILL = 999
 
 
 def font_stack() -> str:
-    """Systemschrift. Keine mitgelieferte Schrift - die faellt immer auf."""
+    """System font. Never a bundled typeface - those always look out of place."""
     return ('"Inter", "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", '
             '"Noto Sans", "Cantarell", system-ui, sans-serif')
 
@@ -83,7 +83,7 @@ def mono_stack() -> str:
 
 
 def stylesheet(p: Palette = DARK) -> str:
-    """Das gesamte Aussehen an einer Stelle."""
+    """The entire look, in one place."""
     return f"""
 * {{
     font-family: {font_stack()};
@@ -103,7 +103,7 @@ QLabel[role="warn"]    {{ font-size: {FONT_SM}px; color: {p.warn}; }}
 QLabel[role="mono"]    {{ font-family: {mono_stack()}; font-size: {FONT_SM}px;
                           color: {p.text_dim}; }}
 
-/* --- Flaechen ----------------------------------------------------- */
+/* --- Surfaces ----------------------------------------------------- */
 QFrame[role="card"] {{
     background: {p.surface};
     border: 1px solid {p.line};
@@ -115,7 +115,7 @@ QFrame[role="card"][selected="true"] {{
 }}
 QFrame[role="rule"] {{ background: {p.line}; border: none; max-height: 1px; }}
 
-/* --- Schaltflaechen ------------------------------------------------ */
+/* --- Buttons ------------------------------------------------------- */
 QPushButton {{
     background: {p.surface};
     border: 1px solid {p.line};
@@ -141,7 +141,7 @@ QPushButton[role="quiet"] {{ background: transparent; border-color: transparent;
 QPushButton[role="quiet"]:hover {{ color: {p.text};
                                    background: {p.surface_alt}; }}
 
-/* --- Eingaben ------------------------------------------------------ */
+/* --- Inputs -------------------------------------------------------- */
 QLineEdit, QComboBox, QSpinBox, QPlainTextEdit {{
     background: {p.bg};
     border: 1px solid {p.line};
@@ -155,7 +155,7 @@ QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QPlainTextEdit:focus {{
 }}
 QComboBox::drop-down {{ border: none; width: 26px; }}
 QComboBox::down-arrow {{
-    /* kleines Dreieck aus Rahmenlinien - kein Bild noetig */
+    /* a small triangle made from borders - no image asset needed */
     width: 0; height: 0; margin-right: 10px;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
@@ -167,7 +167,7 @@ QComboBox QAbstractItemView {{
     outline: none; padding: 4px;
 }}
 
-/* --- Schalter (als schlanke Kaestchen, nicht als Spielzeug) -------- */
+/* --- Checkboxes and radios: plain boxes, not toys ------------------ */
 QCheckBox, QRadioButton {{ spacing: {S2}px; }}
 QCheckBox::indicator, QRadioButton::indicator {{
     width: 15px; height: 15px;
@@ -180,14 +180,14 @@ QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
     background: {p.accent}; border-color: {p.accent};
 }}
 
-/* --- Fortschritt: eine duenne Linie, kein Balken ------------------- */
+/* --- Progress: a thin line, not a chunky bar ----------------------- */
 QProgressBar {{
     background: {p.line}; border: none; border-radius: 2px;
     max-height: 3px; text-align: center; color: transparent;
 }}
 QProgressBar::chunk {{ background: {p.accent}; border-radius: 2px; }}
 
-/* --- Listen -------------------------------------------------------- */
+/* --- Lists --------------------------------------------------------- */
 QListWidget, QTreeWidget, QTableWidget {{
     background: {p.bg}; border: 1px solid {p.line};
     border-radius: {RADIUS}px; outline: none;
@@ -195,7 +195,7 @@ QListWidget, QTreeWidget, QTableWidget {{
 QListWidget::item {{ padding: {S2}px {S3}px; border-radius: 4px; }}
 QListWidget::item:selected {{ background: {p.surface_alt}; color: {p.text}; }}
 
-/* --- Bildlaufleisten: unauffaellig --------------------------------- */
+/* --- Scrollbars: unobtrusive --------------------------------------- */
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}
 QScrollBar::handle:vertical {{ background: {p.line}; border-radius: 5px;
                                min-height: 28px; }}
@@ -206,7 +206,7 @@ QScrollBar:horizontal {{ background: transparent; height: 10px; }}
 QScrollBar::handle:horizontal {{ background: {p.line}; border-radius: 5px;
                                  min-width: 28px; }}
 
-/* --- Reiter -------------------------------------------------------- */
+/* --- Tabs ---------------------------------------------------------- */
 QTabWidget::pane {{ border: none; }}
 QTabBar::tab {{
     background: transparent; border: none; padding: {S2}px {S3}px;
@@ -224,7 +224,7 @@ QToolTip {{
 
 
 def detect_palette() -> Palette:
-    """Systemvorgabe hell/dunkel uebernehmen, statt eine zu erzwingen."""
+    """Follow the system light/dark preference instead of forcing one."""
     try:
         from PySide6.QtGui import QGuiApplication
         from PySide6.QtCore import Qt

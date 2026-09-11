@@ -1,9 +1,8 @@
-"""Audioaufnahme, plattformuebergreifend.
+"""Cross-platform audio capture.
 
-Bevorzugt wird `sounddevice` (PortAudio), weil es auf Windows, Linux und macOS
-dasselbe tut. Fehlt PortAudio - auf Linux keine Seltenheit - wird auf
-`pw-record` bzw. `parec` zurueckgefallen, die auf jedem PipeWire- oder
-PulseAudio-System vorhanden sind.
+`sounddevice` (PortAudio) is preferred because it behaves identically on Windows,
+Linux and macOS. Where PortAudio is absent - not unusual on Linux - it falls back
+to `pw-record` or `parec`, which exist on every PipeWire or PulseAudio system.
 """
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ def backend_name() -> str:
 # ------------------------------------------------------------------ Geraete
 
 def list_input_devices() -> list[dict]:
-    """[{id, label, default}] - id ist fuer das jeweilige Backend gueltig."""
+    """[{id, label, default}] - `id` is valid for whichever backend is active."""
     if _have_sounddevice():
         try:
             import sounddevice as sd
@@ -67,7 +66,7 @@ def list_input_devices() -> list[dict]:
         except Exception:
             pass
 
-    # PipeWire/PulseAudio-Quellen (Monitore weglassen - das sind Lautsprecher)
+    # PipeWire/PulseAudio sources, skipping monitors (those are speaker taps).
     if shutil.which("pactl"):
         try:
             txt = subprocess.run(["pactl", "list", "short", "sources"],
@@ -88,10 +87,11 @@ def list_input_devices() -> list[dict]:
 
 
 def _pretty(node: str) -> str:
-    """Aus 'alsa_input.usb-Focusrite_Scarlett_Solo_USB_Y7U...-00.HiFi__Mic1__source'
-    etwas machen, das ein Mensch wiedererkennt."""
+    """Turn a node name like
+    'alsa_input.usb-Focusrite_Scarlett_Solo_USB_Y7U...-00.HiFi__Mic1__source'
+    into something a person recognises."""
     if ".pci-" in node or node.startswith("alsa_input.pci"):
-        return "Onboard-Audio"
+        return "Onboard audio"
     s = node
     for pre in ("alsa_input.", "alsa_output."):
         s = s.removeprefix(pre)
@@ -103,19 +103,19 @@ def _pretty(node: str) -> str:
         if bits:
             port = f" ({bits[-1]})"
     s = s.replace("_", " ").strip()
-    # Seriennummern am Ende abschneiden - die helfen niemandem.
+    # Drop serial-number-looking tokens - they help nobody.
     words = [w for w in s.split() if not (len(w) > 8 and any(c.isdigit() for c in w))]
     return (" ".join(words) or s)[:48] + port
 
 
-# ------------------------------------------------------------- Aufnahme
+# ------------------------------------------------------------- Recording
 
 class Recorder:
-    """Nimmt fortlaufend auf und sammelt 16-Bit-PCM bei 16 kHz mono."""
+    """Records continuously into 16-bit PCM at 16 kHz mono."""
 
     def __init__(self, device=None, on_block=None):
         self.device = device
-        self.on_block = on_block          # callback(bytes) je Block
+        self.on_block = on_block          # callback(bytes) per block
         self.pcm = bytearray()
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -124,7 +124,7 @@ class Recorder:
         self._thread = None
         self.error: str | None = None
 
-    # -- Steuerung ----------------------------------------------------
+    # -- Control ------------------------------------------------------
     def start(self):
         self._stop.clear()
         with self._lock:
@@ -193,7 +193,7 @@ class Recorder:
     def _run_cli(self):
         tool = _linux_tool()
         if not tool:
-            self.error = "Keine Aufnahmemöglichkeit gefunden (PortAudio, pw-record, parec)"
+            self.error = "No capture backend found (PortAudio, pw-record, parec)"
             return
         if tool[0] == "pw-record":
             cmd = ["pw-record", "--raw", "--rate", str(SAMPLE_RATE),
@@ -220,10 +220,10 @@ class Recorder:
             self._feed(chunk)
 
 
-# -------------------------------------------------------------- Auswertung
+# ---------------------------------------------------------------- Analysis
 
 def peak(pcm: bytes) -> float:
-    """Spitzenpegel 0..1."""
+    """Peak level, 0..1."""
     if len(pcm) < 2:
         return 0.0
     a = array.array("h")
@@ -243,7 +243,7 @@ def rms_dbfs(pcm: bytes) -> float:
 
 
 class LevelMonitor:
-    """Laufender Pegel fuer die Anzeige im Einrichtungsassistenten."""
+    """Live level feed for the meter in the setup wizard."""
 
     def __init__(self, device, on_level):
         self.rec = Recorder(device, on_block=lambda c: on_level(peak(c)))
@@ -256,34 +256,33 @@ class LevelMonitor:
 
 
 def quick_test(device, callback, seconds: float = 5.0):
-    """Kurz aufnehmen und beurteilen. `callback(ok: bool, text: str)`."""
+    """Record briefly and judge the result. `callback(ok: bool, text: str)`."""
 
     def run():
         rec = Recorder(device)
         rec.start()
         if rec.error:
-            callback(False, f"Aufnahme nicht möglich: {rec.error}")
+            callback(False, f"Cannot record: {rec.error}")
             return
         time.sleep(seconds)
         pcm = rec.stop()
         if rec.error:
-            callback(False, f"Aufnahme nicht möglich: {rec.error}")
+            callback(False, f"Cannot record: {rec.error}")
             return
         if len(pcm) < SAMPLE_RATE:
-            callback(False, "Es kamen fast keine Daten an — dieses Gerät liefert nichts.")
+            callback(False, "Almost no data arrived - this device delivers nothing.")
             return
         pk, db = peak(pcm), rms_dbfs(pcm)
         if pk < 0.004:
-            callback(False, "Kein Signal. Das Mikrofon ist stumm oder der Eingang "
-                            "ist der falsche.")
+            callback(False, "No signal. The microphone is muted, or this is the "
+                            "wrong input.")
         elif pk > 0.98:
-            callback(False, f"Übersteuert (Spitze {pk:.2f}). Bitte die Eingangs"
-                            f"verstärkung herunterdrehen.")
+            callback(False, f"Clipping (peak {pk:.2f}). Turn the input gain down.")
         elif db < -45:
-            callback(False, f"Sehr leise ({db:.0f} dBFS). Erkennung wird darunter "
-                            f"leiden — bitte lauter einstellen.")
+            callback(False, f"Very quiet ({db:.0f} dBFS). Recognition will suffer - "
+                            f"please raise the level.")
         else:
-            callback(True, f"Gut: {db:.0f} dBFS, Spitze {pk:.2f}. Das reicht.")
+            callback(True, f"Good: {db:.0f} dBFS, peak {pk:.2f}. That will do.")
 
     threading.Thread(target=run, daemon=True).start()
 

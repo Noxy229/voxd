@@ -1,7 +1,7 @@
-"""Hardware-Erkennung fuer die Modellempfehlung.
+"""Hardware detection, feeding the model recommendation.
 
-Laeuft auf Linux und Windows. Alles, was nicht ermittelbar ist, wird zu None -
-der Empfehlungsteil rechnet dann konservativ, statt zu raten.
+Runs on Linux and Windows. Anything that cannot be determined becomes None, and
+the recommendation logic then errs on the conservative side rather than guessing.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ class Gpu:
     name: str
     vram_mb: int | None = None
     backend: str | None = None  # cuda | vulkan | rocm | metal
-    # Live-Werte, nur wenn das System sie hergibt (Linux/AMD ueber sysfs):
+    # Live values, only where the system exposes them (Linux/AMD via sysfs):
     vram_used_mb: int | None = None
     busy_percent: int | None = None
     _sysfs: str | None = None
@@ -50,7 +50,7 @@ class Gpu:
 
 def _gpus_linux() -> list[Gpu]:
     out = []
-    # Live-Werte gibt es nur ueber sysfs, und dort auch nur bei amdgpu/i915.
+    # Live values come from sysfs, and only amdgpu/i915 provide them.
     for dev in sorted(Path("/sys/class/drm").glob("card*/device")):
         total = dev / "mem_info_vram_total"
         if not total.exists():
@@ -64,15 +64,15 @@ def _gpus_linux() -> list[Gpu]:
         g = Gpu(vendor=vendor, name="", vram_mb=vram, _sysfs=str(dev))
         out.append(g)
 
-    # Namen ueber lspci nachreichen (sysfs kennt nur IDs)
+    # Fill in names via lspci - sysfs only knows numeric IDs.
     lspci = _run(["lspci", "-mm"])
     names = [ln for ln in lspci.splitlines() if re.search(r'"(VGA|3D|Display)', ln)]
     for g, ln in zip(out, names):
         m = re.findall(r'"([^"]*)"', ln)
         if len(m) >= 3:
-            g.name = m[2].strip()          # Feld 2 = Chip; 3 waere der Board-Hersteller
+            g.name = m[2].strip()          # field 2 is the chip; 3 would be the board vendor
 
-    if not out:  # keine sysfs-Infos - wenigstens den Namen holen
+    if not out:  # no sysfs data - at least recover the name
         for ln in names:
             m = re.findall(r'"([^"]*)"', ln)
             nm = m[2].strip() if len(m) >= 3 else "?"
@@ -82,7 +82,7 @@ def _gpus_linux() -> list[Gpu]:
                       "intel" if "intel" in low else "unknown")
             out.append(Gpu(vendor=vendor, name=nm))
 
-    # NVIDIA meldet VRAM nur ueber nvidia-smi
+    # NVIDIA only reports VRAM through nvidia-smi.
     if shutil.which("nvidia-smi"):
         smi = _run(["nvidia-smi", "--query-gpu=name,memory.total,memory.used,utilization.gpu",
                     "--format=csv,noheader,nounits"])
@@ -102,7 +102,7 @@ def _gpus_linux() -> list[Gpu]:
 
 
 def _gpus_windows() -> list[Gpu]:
-    # PowerShell statt WMIC - WMIC ist auf aktuellen Windows-Versionen entfernt.
+    # PowerShell rather than WMIC - WMIC is gone from current Windows releases.
     ps = _run([
         "powershell", "-NoProfile", "-Command",
         "Get-CimInstance Win32_VideoController | "
@@ -120,7 +120,7 @@ def _gpus_windows() -> list[Gpu]:
                       "amd" if ("amd" in low or "radeon" in low) else
                       "intel" if "intel" in low else "unknown")
             ram = d.get("AdapterRAM")
-            # AdapterRAM ist bei >4 GB unbrauchbar (32-Bit-Ueberlauf) - dann lieber nichts.
+            # AdapterRAM overflows above 4 GB (32-bit field) - prefer None over a lie.
             vram = int(ram) // (1024 * 1024) if isinstance(ram, int) and 0 < ram < 2**32 - 1 else None
             out.append(Gpu(vendor=vendor, name=nm, vram_mb=vram))
     except Exception:
@@ -150,7 +150,7 @@ def detect_gpus() -> list[Gpu]:
         gpus = [Gpu("apple", platform.processor() or "Apple Silicon", backend="metal")]
     for g in gpus:
         g.backend = _backend_for(g)
-    # Die dickste zuerst - danach richtet sich die Empfehlung.
+    # Largest first - the recommendation keys off the best card.
     gpus.sort(key=lambda g: (g.vram_mb or 0), reverse=True)
     return gpus
 
@@ -169,7 +169,7 @@ _vulkan_cache: bool | None = None
 
 
 def has_vulkan() -> bool:
-    """Vulkan-Loader vorhanden? Reicht als Naeherung fuer 'GPU nutzbar'."""
+    """Is a Vulkan loader present? A good enough proxy for "GPU is usable"."""
     global _vulkan_cache
     if _vulkan_cache is not None:
         return _vulkan_cache
@@ -184,7 +184,7 @@ def has_vulkan() -> bool:
 
 
 def refresh_gpu_live(g: Gpu) -> Gpu:
-    """VRAM-Belegung und Auslastung nachladen, wo das System sie anbietet."""
+    """Refresh VRAM usage and utilisation where the system offers them."""
     if g._sysfs:
         d = Path(g._sysfs)
         try:
@@ -236,8 +236,8 @@ def detect_cpu() -> Cpu:
                             for ln in info.splitlines() if ln.startswith("core id")}) or logical
         except Exception:
             pass
-        # P- und E-Cores unterscheiden sich im maximalen Takt. Das ist die
-        # zuverlaessigste Quelle, die ohne Zusatzpakete verfuegbar ist.
+        # Performance and efficiency cores differ in maximum clock. That is the
+        # most reliable signal available without extra packages.
         freqs: dict[int, int] = {}
         for c in sorted(Path("/sys/devices/system/cpu").glob("cpu[0-9]*")):
             f = c / "cpufreq/cpuinfo_max_freq"
@@ -261,7 +261,7 @@ def detect_cpu() -> Cpu:
         except Exception:
             pass
 
-    return Cpu(name=name or "unbekannt", physical_cores=physical,
+    return Cpu(name=name or "unknown", physical_cores=physical,
                logical_cores=logical, efficiency_cores=eff, performance_cores=perf)
 
 
@@ -298,7 +298,7 @@ def total_ram_mb() -> int:
 
 
 def detect_desktop() -> dict:
-    """Unter welcher Oberflaeche laufen wir? Entscheidet Tastenkuerzel und Einfuegeweg."""
+    """Which desktop are we on? Decides hotkey route and text injection."""
     if IS_WINDOWS:
         return {"os": "windows", "release": platform.release(), "session": "win32",
                 "desktop": "windows"}
@@ -345,21 +345,21 @@ class Machine:
         return usable[0] if usable else None
 
     def summary(self) -> list[tuple[str, str]]:
-        """Zeilen fuer den Installer - was erkannt wurde, offen hingeschrieben."""
+        """Rows for the installer - what was detected, stated plainly."""
         c = self.cpu
-        cores = f"{c.physical_cores} Kerne / {c.logical_cores} Threads"
+        cores = f"{c.physical_cores} cores / {c.logical_cores} threads"
         if c.has_hybrid:
-            cores += (f"  ({len(c.performance_cores)} schnelle, "
-                      f"{len(c.efficiency_cores)} sparsame Threads)")
-        rows = [("Prozessor", f"{c.name}"), ("Kerne", cores),
-                ("Arbeitsspeicher", f"{self.ram_mb / 1024:.0f} GB")]
+            cores += (f"  ({len(c.performance_cores)} performance, "
+                      f"{len(c.efficiency_cores)} efficiency threads)")
+        rows = [("Processor", f"{c.name}"), ("Cores", cores),
+                ("Memory", f"{self.ram_mb / 1024:.0f} GB")]
         if self.gpus:
             for g in self.gpus:
-                v = f"{g.vram_mb / 1024:.0f} GB" if g.vram_mb else "Größe unbekannt"
-                b = f", {g.backend}" if g.backend else ", nicht nutzbar"
-                rows.append(("Grafik", f"{g.name or g.vendor} — {v}{b}"))
+                v = f"{g.vram_mb / 1024:.0f} GB" if g.vram_mb else "size unknown"
+                b = f", {g.backend}" if g.backend else ", not usable"
+                rows.append(("Graphics", f"{g.name or g.vendor} — {v}{b}"))
         else:
-            rows.append(("Grafik", "keine dedizierte erkannt"))
+            rows.append(("Graphics", "no discrete card detected"))
         s = self.system
         osname = s.get("distro") or s.get("os", "?")
         rows.append(("System", f"{osname} ({s.get('session', '?')}, {s.get('desktop', '?')})"))

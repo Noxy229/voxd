@@ -1,7 +1,7 @@
-"""Kleine wiederverwendbare Bausteine.
+"""Small reusable building blocks.
 
-Alles hier haelt sich an theme.py. Kein Baustein bringt eigene Farben oder
-Radien mit - sonst faellt das System auseinander.
+Everything here defers to theme.py. No widget carries its own colours or radii -
+that is how a design system falls apart.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ def label(text: str, role: str = "", wrap: bool = False) -> QLabel:
         lb.setProperty("role", role)
     lb.setWordWrap(wrap)
     if wrap:
-        # Ohne das meldet ein umbrechendes QLabel eine zu kleine Hoehe und
-        # wird im Layout abgeschnitten.
+        # Without this a word-wrapping QLabel reports too small a height and
+        # gets clipped by the layout.
         lb.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
     lb.setTextInteractionFlags(Qt.TextSelectableByMouse)
     return lb
@@ -44,7 +44,7 @@ def spacer(h: int = 0) -> QWidget:
 
 
 class Card(QFrame):
-    """Eine Flaeche. Optional anklickbar - dann meldet sie `clicked`."""
+    """A surface. Optionally clickable, in which case it emits `clicked`."""
 
     clicked = Signal()
 
@@ -61,7 +61,7 @@ class Card(QFrame):
 
     def set_selected(self, on: bool):
         self.setProperty("selected", "true" if on else "false")
-        # Qt uebernimmt geaenderte Eigenschaften im Stylesheet nicht von selbst.
+        # Qt does not re-evaluate stylesheet property selectors on its own.
         self.style().unpolish(self)
         self.style().polish(self)
 
@@ -72,7 +72,7 @@ class Card(QFrame):
 
 
 class KeyValue(QWidget):
-    """Zwei Spalten, linke Spalte fest - damit Werte untereinander fluchten."""
+    """Two columns with a fixed left column, so values line up vertically."""
 
     def __init__(self, key_width: int = 150):
         super().__init__()
@@ -97,7 +97,7 @@ class KeyValue(QWidget):
 
 
 class LevelMeter(QWidget):
-    """Waagerechte Pegelanzeige - dieselbe Bildsprache wie im Overlay."""
+    """Horizontal level meter - the same visual language as the overlay."""
 
     def __init__(self, palette: Palette, bars: int = 40):
         super().__init__()
@@ -130,7 +130,7 @@ class LevelMeter(QWidget):
 
 
 class Badge(QLabel):
-    """Kleine Markierung, etwa 'gemessen' oder 'geschaetzt'."""
+    """A small tag, e.g. "measured" or "estimated"."""
 
     def __init__(self, text: str, palette: Palette, strong: bool = False):
         super().__init__(text)

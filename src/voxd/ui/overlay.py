@@ -1,12 +1,11 @@
-"""Das Overlay waehrend des Diktats.
+"""The overlay shown while dictating.
 
-Eine flache Kapsel am unteren Bildschirmrand. Links eine Pegelanzeige, rechts
-der Text. Keine Beschriftungen, keine Statuswoerter, kein Fortschrittsbalken -
-der Zustand ergibt sich aus dem, was die Pegelanzeige tut, und aus der Helligkeit
-des Textes.
+A flat capsule at the bottom of the screen: a level meter on the left, the text
+on the right. No labels, no status words, no progress bar - state is carried by
+what the meter is doing and by the brightness of the text.
 
-Wichtig: Das Fenster darf den Fokus nicht annehmen, sonst tippt das Einfuegen
-spaeter ins Overlay statt ins Zielfeld.
+Critical: this window must never take focus, or the injection step would type
+into the overlay instead of the target field.
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ from PySide6.QtWidgets import QWidget
 
 from .theme import DARK, FONT_MD, Palette, S2, S3, S4
 
-BARS = 14              # Striche der Pegelanzeige
+BARS = 14              # bars in the level meter
 BAR_W = 2
 BAR_GAP = 2
 CAPSULE_H = 34
@@ -29,7 +28,7 @@ MIN_W = 190
 
 
 class Overlay(QWidget):
-    """Zustaende: idle (unsichtbar), listening, thinking, done, problem."""
+    """States: idle (hidden), listening, thinking, done, problem."""
 
     def __init__(self, palette: Palette = DARK):
         super().__init__(None)
@@ -43,7 +42,7 @@ class Overlay(QWidget):
         self.setWindowFlags(
             Qt.FramelessWindowHint
             | Qt.WindowStaysOnTopHint
-            | Qt.Tool                       # keine Taskleiste, kein Fokus
+            | Qt.Tool                       # no taskbar entry, no focus
             | Qt.WindowDoesNotAcceptFocus
             | Qt.BypassWindowManagerHint
         )
@@ -55,7 +54,7 @@ class Overlay(QWidget):
         self._font.setPixelSize(FONT_MD)
         self._fm = QFontMetrics(self._font)
 
-        # Ein Takt fuer alles Bewegte. 30/s reicht und kostet fast nichts.
+        # One clock for everything that moves. 30 Hz is plenty and costs little.
         self._tick = QTimer(self)
         self._tick.timeout.connect(self._animate)
         self._tick.setInterval(33)
@@ -93,7 +92,7 @@ class Overlay(QWidget):
         self._hide_timer.start(hold_ms)
 
     def push_level(self, level: float):
-        """Neuen Pegelwert einschieben (0..1). Die Anzeige laeuft nach links."""
+        """Push a new level (0..1). The meter scrolls to the left."""
         self.levels = self.levels[1:] + [max(0.0, min(1.0, level))]
 
     def set_text(self, text: str):
@@ -107,7 +106,7 @@ class Overlay(QWidget):
         self._hide_timer.stop()
         self.hide()
 
-    # ------------------------------------------------------- Innenleben
+    # ---------------------------------------------------------- Internals
 
     def _appear(self):
         self._relayout()
@@ -118,7 +117,7 @@ class Overlay(QWidget):
 
     def _relayout(self):
         meter_w = BARS * (BAR_W + BAR_GAP)
-        # +2 px Luft: bei exakt gleicher Breite kuerzt Qt sonst trotzdem.
+        # +2 px slack: at exactly equal widths Qt elides anyway.
         text_w = (self._fm.horizontalAdvance(self.text) + 2) if self.text else 0
         w = S4 + meter_w + S3 + text_w + S4
         w = max(MIN_W, min(MAX_W, w))
@@ -133,15 +132,15 @@ class Overlay(QWidget):
         if self._fade < 1.0:
             self._fade = min(1.0, self._fade + 0.18)
         if self.state == "thinking":
-            # Kein Spinner. Die Pegelstriche sinken zu einer ruhigen Welle ab -
-            # sichtbar, dass noch etwas passiert, ohne zu blinken.
+            # No spinner. The bars settle into a slow wave - visibly still busy,
+            # without anything blinking.
             self.levels = [0.12 + 0.1 * math.sin(self._phase + i * 0.5)
                            for i in range(BARS)]
         elif self.state in ("done", "problem"):
             self.levels = [v * 0.82 for v in self.levels]
         self.update()
 
-    # ------------------------------------------------------------ Malen
+    # ------------------------------------------------------------ Painting
 
     def paintEvent(self, _e):
         p = self.p
@@ -173,10 +172,10 @@ class Overlay(QWidget):
                       else p.warn if self.state == "problem" else p.text_dim)
 
         for i, lv in enumerate(self.levels):
-            # Wurzel staucht die Dynamik: leise Sprache bleibt sichtbar.
+            # Square root compresses the dynamics so quiet speech stays visible.
             h = 2 + (CAPSULE_H - 16) * math.sqrt(lv)
             c = QColor(base)
-            # Neuere Werte rechts sind kraeftiger - die Anzeige bekommt Richtung.
+            # Newer values on the right are stronger, giving the meter direction.
             c.setAlphaF((0.28 + 0.72 * (i / max(1, BARS - 1))) * self._fade)
             qp.fillRect(QRectF(x, mid - h / 2, BAR_W, h), c)
             x += BAR_W + BAR_GAP
@@ -187,7 +186,7 @@ class Overlay(QWidget):
         p = self.p
         x = S4 + BARS * (BAR_W + BAR_GAP) + S3
         avail = self.width() - x - S4
-        # Beim Kuerzen vorne abschneiden: das zuletzt Gesagte ist das Wichtige.
+        # Elide from the left: the most recent words are the ones that matter.
         shown = self._fm.elidedText(self.text, Qt.ElideLeft, int(avail))
 
         col = QColor(p.text_dim if self.state == "listening"
@@ -200,17 +199,17 @@ class Overlay(QWidget):
 
 
 def attach_layer_shell(win: QWidget) -> bool:
-    """Auf wlroots-Compositors das Overlay als Layer-Surface anmelden.
+    """Register the overlay as a layer surface on wlroots compositors.
 
-    Nur dort laesst sich zuverlaessig garantieren, dass das Fenster ueber allem
-    liegt und den Fokus nicht anfasst. Ueberall sonst reicht Qt.Tool.
+    Only there can we guarantee it stays above everything and never touches
+    focus. Elsewhere Qt.Tool carries the normal case.
     """
     if not sys.platform.startswith("linux"):
         return False
     try:
         from ctypes import CDLL, c_void_p, c_int
-        lib = CDLL("libgtk4-layer-shell.so")   # nur zum Pruefen der Verfuegbarkeit
+        lib = CDLL("libgtk4-layer-shell.so")   # availability probe only
         _ = lib
     except OSError:
         return False
-    return False  # Anbindung folgt; Qt.Tool traegt den Normalfall
+    return False  # binding to follow; Qt.Tool covers the normal case

@@ -1,8 +1,8 @@
-"""Einrichtung beim ersten Start.
+"""First-run setup.
 
-Sieben Schritte, kein Terminal. Der Aufbau ist bewusst schlicht: eine
-Schrittangabe, eine Ueberschrift, ein Inhalt, eine Fusszeile. Keine Seitenleiste
-mit Symbolen, keine Fortschrittsperlen - das waere Dekoration ohne Nutzen.
+Seven steps, no terminal required. The structure is deliberately plain: a step
+counter, a heading, the content, a footer. No icon rail, no progress beads —
+that would be decoration without information.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ PKG_HINTS = {
     "apk": "sudo apk add {}",
 }
 
-# Paketnamen unterscheiden sich je Distribution.
+# Package names differ between distributions.
 PKG_NAMES = {
     "pacman": {"wtype": "wtype", "ydotool": "ydotool", "wl-copy": "wl-clipboard",
                "xdotool": "xdotool", "portaudio": "portaudio"},
@@ -39,7 +39,7 @@ PKG_NAMES = {
 
 
 class Step(QWidget):
-    """Eine Seite. Unterklassen fuellen `body` und setzen Titel und Vorspann."""
+    """One page. Subclasses fill `body` and set `title` / `lead`."""
 
     changed = Signal()
 
@@ -51,8 +51,8 @@ class Step(QWidget):
         self.wiz = wiz
         self.p = wiz.p
 
-        # Der Inhalt liegt in einem Rollbereich. Sichtbar wird der nur, wenn
-        # eine Seite laenger wird als das Fenster - sonst faellt er nicht auf.
+        # Content lives in a scroll area. It only becomes visible when a page
+        # outgrows the window, so it never draws attention to itself.
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
@@ -95,25 +95,25 @@ class Step(QWidget):
         ...
 
 
-# --------------------------------------------------------------- 1 Willkommen
+# ----------------------------------------------------------------- 1 Welcome
 
 class WelcomeStep(Step):
     title = "voxd"
-    lead = ("Diktieren mit Selbstkorrektur. Taste drücken, sprechen, der Text "
-            "steht im Feld — nichts davon verlässt diesen Rechner.")
+    lead = ("Dictation that understands corrections. Press a key, speak, and the "
+            "text lands in the field — none of it leaves this machine.")
 
     def build(self):
         c = Card()
         c.box.setSpacing(S3)
-        c.box.addWidget(label("Du darfst Dich mitten im Satz korrigieren:", "caption"))
+        c.box.addWidget(label("You can correct yourself mid-sentence:", "caption"))
 
         for spoken, written in (
-            ("\u201e\u2026dass das Meeting am Dienstag stattfindet. Nee, Mittwoch. "
-             "Mittwoch um drei.\u201c",
-             "Das Meeting findet am Mittwoch um drei Uhr statt."),
-            ("\u201eDie Doku f\u00fcrs Deployment-Skript, ach nee, streich das, "
-             "die Doku f\u00fcr die CI-Pipeline.\u201c",
-             "Ich brauche die Doku f\u00fcr die CI-Pipeline."),
+            ("“…that the meeting is on Tuesday. No, Wednesday. "
+             "Wednesday at three.”",
+             "The meeting is on Wednesday at three."),
+            ("“The docs for the deployment script, actually no, scratch "
+             "that, the docs for the CI pipeline.”",
+             "I need the docs for the CI pipeline."),
         ):
             row = QVBoxLayout()
             row.setSpacing(2)
@@ -122,15 +122,15 @@ class WelcomeStep(Step):
             c.box.addLayout(row)
         self.body.addWidget(c)
         self.body.addWidget(label(
-            "Die Einrichtung dauert wenige Minuten. Du kannst alles später ändern.",
+            "Setup takes a few minutes. Everything here can be changed later.",
             "caption", wrap=True))
 
 
 # ---------------------------------------------------------------- 2 Hardware
 
 class HardwareStep(Step):
-    title = "Was in diesem Rechner steckt"
-    lead = "Danach richtet sich die Empfehlung im nächsten Schritt."
+    title = "What is in this machine"
+    lead = "The recommendation on the next page follows from this."
 
     def build(self):
         c = Card()
@@ -141,10 +141,10 @@ class HardwareStep(Step):
         self.body.addWidget(c)
 
 
-# -------------------------------------------------------------- 3 Empfehlung
+# ----------------------------------------------------------- 3 Recommendation
 
 class RecommendStep(Step):
-    title = "Vorschlag"
+    title = "Recommendation"
     lead = ""
 
     def build(self):
@@ -156,9 +156,9 @@ class RecommendStep(Step):
         main.box.setSpacing(S2)
 
         head = QHBoxLayout()
-        head.addWidget(label("Empfohlen", "section"))
+        head.addWidget(label("Recommended", "section"))
         head.addStretch(1)
-        head.addWidget(label(f"{rec.total_mb / 1024:.1f} GB Download", "caption"))
+        head.addWidget(label(f"{rec.total_mb / 1024:.1f} GB download", "caption"))
         main.box.addLayout(head)
 
         main.box.addWidget(label(rec.asr.title))
@@ -166,29 +166,29 @@ class RecommendStep(Step):
         if rec.asr.measured_on:
             row = QHBoxLayout()
             row.setSpacing(S2)
-            row.addWidget(Badge("gemessen", self.p, strong=True))
+            row.addWidget(Badge("measured", self.p, strong=True))
             row.addWidget(label(rec.asr.measured_on, "mono"), 1)
             main.box.addLayout(row)
 
         main.box.addWidget(spacer(S2))
         if rec.llm:
+            where = "graphics card" if rec.llm_device == "gpu" else "processor"
             main.box.addWidget(label(
-                f"{rec.llm.title} — Selbstkorrektur "
-                f"({'Grafikkarte' if rec.llm_device == 'gpu' else 'Prozessor'})"))
+                f"{rec.llm.title} — self-correction, on the {where}"))
             main.box.addWidget(label(rec.llm.blurb, "caption", wrap=True))
         else:
-            main.box.addWidget(label("Ohne Sprachmodell", ""))
+            main.box.addWidget(label("No language model", ""))
             main.box.addWidget(label(
-                "Für die Selbstkorrektur wäre ein zusätzliches Modell nötig; dieser "
-                "Rechner ist dafür zu knapp. Satzzeichen setzt die Spracherkennung "
-                "selbst.", "caption", wrap=True))
+                "Self-correction would need an extra model, and this machine is "
+                "too tight for one. Punctuation still works — the recogniser "
+                "does that itself.", "caption", wrap=True))
 
         self.body.addWidget(main)
         self.body.addWidget(label(rec.reason, "caption", wrap=True))
 
         if rec.alternatives:
             self.body.addWidget(spacer(S2))
-            self.body.addWidget(label("Andere Möglichkeit", "section"))
+            self.body.addWidget(label("Alternative", "section"))
             for alt in rec.alternatives:
                 a = Card(selectable=True)
                 a.box.setSpacing(2)
@@ -214,12 +214,12 @@ class RecommendStep(Step):
         main.clicked.connect(pick_main)
 
 
-# ------------------------------------------------------------ 4 Systemteile
+# ------------------------------------------------------------ 4 Dependencies
 
 class DepsStep(Step):
-    title = "Systemteile"
-    lead = ("voxd braucht ein paar Programme des Betriebssystems, um Text in "
-            "fremde Fenster schreiben zu können.")
+    title = "System components"
+    lead = ("voxd needs a few operating-system tools to be able to type into "
+            "other applications' windows.")
 
     def build(self):
         import shutil
@@ -227,19 +227,19 @@ class DepsStep(Step):
         mgr = sysinfo.get("package_manager")
         wayland = sysinfo.get("session") == "wayland"
 
-        needed = [("wl-copy", "Zwischenablage", True)]
+        needed = [("wl-copy", "Clipboard", True)]
         if wayland:
-            needed += [("wtype", "Text tippen (Wayland)", True),
-                       ("ydotool", "Rückfallebene", False)]
+            needed += [("wtype", "Typing (Wayland)", True),
+                       ("ydotool", "Fallback", False)]
         else:
-            needed += [("xdotool", "Text tippen (X11)", True)]
+            needed += [("xdotool", "Typing (X11)", True)]
 
         missing = []
         c = Card()
         kv = KeyValue(160)
         for binary, purpose, required in needed:
             ok = shutil.which(binary) is not None
-            kv.add(purpose, f"{binary} — {'vorhanden' if ok else 'fehlt'}",
+            kv.add(purpose, f"{binary} — {'present' if ok else 'missing'}",
                    "" if ok else "warn")
             if not ok and required:
                 missing.append(binary)
@@ -247,32 +247,31 @@ class DepsStep(Step):
         self.body.addWidget(c)
 
         if not missing:
-            self.body.addWidget(label("Alles da. Nichts zu tun.", "caption"))
+            self.body.addWidget(label("All present. Nothing to do.", "caption"))
             return
 
         names = [PKG_NAMES.get(mgr, {}).get(b, b) for b in missing]
         if mgr and mgr in PKG_HINTS:
             cmd = PKG_HINTS[mgr].format(" ".join(names))
-            self.body.addWidget(label("So installierst Du sie:", "caption"))
+            self.body.addWidget(label("Install them with:", "caption"))
             box = Card()
             box.box.addWidget(label(cmd, "mono", wrap=True))
             self.body.addWidget(box)
         else:
             self.body.addWidget(label(
-                "Paketverwaltung nicht erkannt. Bitte installiere: "
+                "Package manager not recognised. Please install: "
                 + ", ".join(names), "warn", wrap=True))
         self.body.addWidget(label(
-            "Du kannst auch ohne weitermachen — dann landet der Text in der "
-            "Zwischenablage statt direkt im Feld.", "caption", wrap=True))
+            "You can continue without them — dictated text then lands in the "
+            "clipboard instead of directly in the field.", "caption", wrap=True))
 
 
-# ------------------------------------------------------------- 5 Mikrofon
+# ------------------------------------------------------------- 5 Microphone
 
 class MicStep(Step):
-    title = "Mikrofon"
-    lead = ("Sprich einen Satz und sieh nach, ob der Ausschlag mitgeht. Ein "
-            "totes Mikrofon ist der häufigste Grund, warum Diktieren nicht "
-            "funktioniert.")
+    title = "Microphone"
+    lead = ("Say a sentence and watch the meter move. A dead microphone is the "
+            "single most common reason dictation does not work.")
 
     def build(self):
         self.combo = QComboBox()
@@ -287,7 +286,7 @@ class MicStep(Step):
         self.body.addWidget(c)
 
         row = QHBoxLayout()
-        self.test_btn = QPushButton("Fünf Sekunden aufnehmen und prüfen")
+        self.test_btn = QPushButton("Record five seconds and check")
         self.test_btn.clicked.connect(self._test)
         row.addWidget(self.test_btn)
         row.addStretch(1)
@@ -308,7 +307,7 @@ class MicStep(Step):
 
     def _test(self):
         self.test_btn.setEnabled(False)
-        self.result.setText("Läuft…")
+        self.result.setText("Recording…")
         self.wiz.run_mic_test(self.combo.currentData(), self._done)
 
     def _done(self, ok: bool, message: str):
@@ -319,40 +318,42 @@ class MicStep(Step):
         self.result.style().polish(self.result)
 
 
-# --------------------------------------------------------- 6 Tastenkuerzel
+# ---------------------------------------------------------------- 6 Shortcut
 
 class HotkeyStep(Step):
-    title = "Tastenkombination"
+    title = "Keyboard shortcut"
     lead = ""
 
     def build(self):
         sysinfo = self.wiz.machine.system
         c = Card()
-        c.box.addWidget(label("Diktat starten und beenden", "caption"))
+        c.box.addWidget(label("Start and stop dictation", "caption"))
         c.box.addWidget(label(self.wiz.hotkey_label, "title"))
         self.body.addWidget(c)
 
         desktop = (sysinfo.get("desktop") or "").lower()
         if sysinfo.get("os") == "windows":
-            note = ("Wird direkt bei Windows angemeldet. Falls ein anderes Programm "
-                    "die Kombination schon belegt, sagt voxd Bescheid.")
+            note = ("Registered directly with Windows. If another program has "
+                    "already claimed the combination, voxd will say so.")
         elif any(k in desktop for k in ("hyprland", "sway", "river", "niri")):
-            note = (f"Wird als Tastenbindung in Deiner {desktop.title()}-Konfiguration "
-                    "eingetragen. Das ist der zuverlässigste Weg unter Wayland.")
+            note = (f"Written into your {desktop.title()} configuration as a key "
+                    "binding. On Wayland that is the only reliable route — the "
+                    "protocol does not let an application grab global keys.")
         elif "gnome" in desktop or "kde" in desktop or "plasma" in desktop:
-            note = ("Wird in den Systemeinstellungen als eigene Tastenbindung angelegt. "
-                    "Sollte das nicht durchgehen, kannst Du sie dort selbst auf "
-                    "„voxctl toggle“ legen.")
+            note = ("Added as a custom shortcut in your system settings. If that "
+                    "does not take, you can bind it there yourself to the "
+                    "command: voxctl toggle")
         else:
-            note = ("Deine Oberfläche kenne ich nicht. Lege die Kombination bitte "
-                    "selbst in den Systemeinstellungen an, Befehl: voxctl toggle")
+            note = ("Your desktop environment is not one voxd knows. Please add "
+                    "the shortcut yourself in the system settings, bound to the "
+                    "command: voxctl toggle")
         self.body.addWidget(label(note, "caption", wrap=True))
 
 
-# ------------------------------------------------------------------ 7 Laden
+# ---------------------------------------------------------------- 7 Download
 
 class DownloadStep(Step):
-    title = "Modelle laden"
+    title = "Download models"
     lead = ""
 
     def build(self):
@@ -369,15 +370,15 @@ class DownloadStep(Step):
         total = sum(m.size_mb for m in models)
         for m in models:
             self.rows.add(m.title, f"{m.size_mb / 1024:.1f} GB")
-        self.status.setText(f"Zusammen {total / 1024:.1f} GB. "
-                            "Der Download startet, sobald Du auf Fertigstellen klickst.")
+        self.status.setText(f"{total / 1024:.1f} GB in total. The download starts "
+                            "when you press Finish.")
 
 
 STEPS = [WelcomeStep, HardwareStep, RecommendStep, DepsStep, MicStep,
          HotkeyStep, DownloadStep]
 
 
-# ------------------------------------------------------------------ Rahmen
+# ------------------------------------------------------------------- Shell
 
 class Wizard(QWidget):
     finished = Signal(dict)
@@ -388,12 +389,12 @@ class Wizard(QWidget):
         self.machine = machine or hardware.detect()
         self.rec = catalog.recommend(self.machine)
         self.choice = "recommended"
-        self.hotkey_label = ("Windows + H" if self.machine.system.get("os") == "windows"
+        self.hotkey_label = ("Win + H" if self.machine.system.get("os") == "windows"
                              else "Super + H")
         self._monitor = None
 
         self.setObjectName("root")
-        self.setWindowTitle("voxd einrichten")
+        self.setWindowTitle("Set up voxd")
         self.setStyleSheet(stylesheet(palette))
         self.resize(720, 600)
 
@@ -401,7 +402,7 @@ class Wizard(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Kopf: nur die Schrittangabe, sonst nichts.
+        # Header: the step counter and nothing else.
         head = QWidget()
         hb = QHBoxLayout(head)
         hb.setContentsMargins(S6, S4, S6, 0)
@@ -420,10 +421,10 @@ class Wizard(QWidget):
         fb = QHBoxLayout(foot)
         fb.setContentsMargins(S6, S3, S6, S4)
         fb.setSpacing(S2)
-        self.back_btn = QPushButton("Zurück")
+        self.back_btn = QPushButton("Back")
         self.back_btn.setProperty("role", "quiet")
         self.back_btn.clicked.connect(self.back)
-        self.next_btn = QPushButton("Weiter")
+        self.next_btn = QPushButton("Continue")
         self.next_btn.setProperty("role", "primary")
         self.next_btn.setDefault(True)
         self.next_btn.clicked.connect(self.next)
@@ -437,9 +438,9 @@ class Wizard(QWidget):
     # -- Navigation ------------------------------------------------------
     def _sync(self):
         i = self.stack.currentIndex()
-        self.step_label.setText(f"Schritt {i + 1} von {len(STEPS)}")
+        self.step_label.setText(f"Step {i + 1} of {len(STEPS)}")
         self.back_btn.setVisible(i > 0)
-        self.next_btn.setText("Fertigstellen" if i == len(STEPS) - 1 else "Weiter")
+        self.next_btn.setText("Finish" if i == len(STEPS) - 1 else "Continue")
         self.stack.currentWidget().on_enter()
 
     def next(self):
@@ -466,7 +467,7 @@ class Wizard(QWidget):
                 "llm_device": self.rec.llm_device,
                 "hotkey": self.hotkey_label}
 
-    # -- Haken, die die Anwendung setzt ----------------------------------
+    # -- Hooks the application provides ----------------------------------
     def list_inputs(self) -> list[dict]:
         from ..audio import list_input_devices
         return list_input_devices()

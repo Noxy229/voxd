@@ -1,9 +1,9 @@
-"""Modellkatalog und Empfehlung.
+"""Model catalogue and hardware-aware recommendation.
 
-Jeder Eintrag traegt, woher die Tempoangabe stammt: `measured` heisst, auf
-echter Hardware gemessen (siehe `measured_on`), `estimated` heisst geschaetzt.
-Der Installer zeigt das an - geschaetzte Zahlen sollen nicht wie Messwerte
-aussehen.
+Every entry records where its speed figure comes from: `measured` means it was
+timed on real hardware (see `measured_on`), `estimated` means it is an informed
+guess. The installer surfaces that distinction — guesses must not be dressed up
+as measurements.
 """
 
 from __future__ import annotations
@@ -28,9 +28,9 @@ class Model:
     title: str
     blurb: str
     files: list[ModelFile]
-    languages: str = "mehrsprachig"
+    languages: str = "multilingual"
     license: str = ""
-    # Tempoangabe: Faktor gegenueber Echtzeit (hoeher ist besser)
+    # Speed as a multiple of real time — higher is better.
     speed_cpu: float | None = None
     speed_gpu: float | None = None
     speed_source: str = "estimated"      # "measured" | "estimated"
@@ -55,7 +55,7 @@ def _parakeet(tag: str, quant: str, enc_mb: int, dec_mb: int, join_mb: int,
                ModelFile(f"decoder{sfx}.onnx", f"{HF}/{repo}/resolve/main/decoder{sfx}.onnx", dec_mb),
                ModelFile(f"joiner{sfx}.onnx", f"{HF}/{repo}/resolve/main/joiner{sfx}.onnx", join_mb),
                ModelFile("tokens.txt", f"{HF}/{repo}/resolve/main/tokens.txt", 1)],
-        languages="25 Sprachen, u. a. Deutsch und Englisch",
+        languages="25 languages, including English and German",
         license="CC-BY-4.0 (NVIDIA)", **kw)
 
 
@@ -64,7 +64,7 @@ def _whisper(name: str, size_mb: int, title: str, blurb: str, **kw) -> Model:
         id=f"whisper-{name}", kind="asr", engine="whispercpp", title=title, blurb=blurb,
         files=[ModelFile(f"ggml-{name}.bin",
                          f"{HF}/ggerganov/whisper.cpp/resolve/main/ggml-{name}.bin", size_mb)],
-        languages="99 Sprachen", license="MIT (OpenAI-Gewichte)", **kw)
+        languages="99 languages", license="MIT (OpenAI weights)", **kw)
 
 
 def _qwen(size: str, quant: str, size_mb: int, repo: str, fname: str, **kw) -> Model:
@@ -72,68 +72,66 @@ def _qwen(size: str, quant: str, size_mb: int, repo: str, fname: str, **kw) -> M
         id=f"qwen3-{size}-{quant}".lower(), kind="llm", engine="llamacpp",
         title=f"Qwen3 {size} ({quant})",
         files=[ModelFile(fname, f"{HF}/{repo}/resolve/main/{fname}", size_mb)],
-        languages="mehrsprachig", license="Apache-2.0", **kw)
+        languages="multilingual", license="Apache-2.0", **kw)
 
 
-# ------------------------------------------------------------------ Katalog
+# ----------------------------------------------------------------- Catalogue
 
 CATALOG: list[Model] = [
-    # --- Spracherkennung ------------------------------------------------
+    # --- Speech recognition ---------------------------------------------
     _parakeet(
         "-int8", "int8", 622, 12, 7,
-        blurb="Der Standard. Erstaunlich schnell auf der CPU, setzt von sich aus "
-              "Satzzeichen und Großschreibung. Braucht keine Grafikkarte.",
+        blurb="The default. Remarkably fast on CPU, and it punctuates and "
+              "capitalises on its own. No graphics card required.",
         speed_cpu=15.0, speed_gpu=None, speed_source="measured",
-        measured_on="i5-13600KF, 8 Threads: 15× Echtzeit · nur 2 Kerne: 5× Echtzeit",
+        measured_on="i5-13600KF, 8 threads: 15x real time · only 2 cores: 5x real time",
         min_ram_mb=2048),
     _whisper(
-        "large-v3-turbo", 1625,
-        "Whisper large-v3-turbo",
-        blurb="Höchste Genauigkeit bei seltenen Wörtern und schwierigem Ton. "
-              "Braucht eine Grafikkarte, auf der CPU zu langsam.",
+        "large-v3-turbo", 1625, "Whisper large-v3-turbo",
+        blurb="Highest accuracy on rare words and difficult audio. Needs a "
+              "graphics card — on CPU it is too slow to be usable.",
         speed_cpu=0.3, speed_gpu=6.0, speed_source="measured",
-        measured_on="RX 9070 XT: 6× Echtzeit · i5-13600KF CPU: 0,3× (unbrauchbar)",
+        measured_on="RX 9070 XT: 6x real time · i5-13600KF CPU: 0.3x (unusable)",
         min_ram_mb=4096, min_vram_mb=2500, needs_gpu=True),
     _whisper(
-        "large-v3-turbo-q5_0", 574,
-        "Whisper large-v3-turbo (klein)",
-        blurb="Wie oben, aber ein Drittel des Speicherbedarfs. Für Grafikkarten, "
-              "auf denen es knapp wird.",
+        "large-v3-turbo-q5_0", 574, "Whisper large-v3-turbo (compact)",
+        blurb="Same model, a third of the memory. For graphics cards where "
+              "VRAM is tight.",
         speed_cpu=0.3, speed_gpu=2.0, speed_source="measured",
-        measured_on="RX 9070 XT: 8,4 s Audio in 1,3 s",
+        measured_on="RX 9070 XT: 8.4 s of audio in 1.3 s",
         min_ram_mb=2048, min_vram_mb=1200, needs_gpu=True),
     _whisper(
         "small", 488, "Whisper small",
-        blurb="Der alte Notnagel für schwache Rechner. Parakeet ist hier in fast "
-              "jeder Hinsicht besser — nur falls Whisper aus anderen Gründen sein muss.",
+        blurb="The old fallback for weak machines. Parakeet beats it on almost "
+              "every axis — pick this only if you specifically need Whisper.",
         speed_cpu=1.5, speed_source="estimated", min_ram_mb=1536),
 
-    # --- Stimmerkennung (Stille wegschneiden) ---------------------------
+    # --- Voice activity detection ---------------------------------------
     Model(id="silero-vad", kind="vad", engine="whispercpp", title="Silero VAD",
-          blurb="Erkennt, wo tatsächlich gesprochen wird. Verhindert, dass in "
-                "Stillephasen Text erfunden wird.",
+          blurb="Finds the stretches where someone is actually speaking, so the "
+                "recogniser does not invent text during silence.",
           files=[ModelFile("ggml-silero-v6.2.0.bin",
                            f"{HF}/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin", 1)],
           license="MIT"),
 
-    # --- Redigieren -----------------------------------------------------
+    # --- Editing pass ----------------------------------------------------
     _qwen("4B", "Q5_K_M", 2780, "unsloth/Qwen3-4B-Instruct-2507-GGUF",
           "Qwen3-4B-Instruct-2507-Q5_K_M.gguf",
-          blurb="Versteht Selbstkorrekturen zuverlässig („nee, streich das“). "
-                "Die empfohlene Wahl, wenn der Rechner sie tragen kann.",
+          blurb="Understands spoken self-corrections reliably (“no, scratch "
+                "that”). The recommended choice where the machine can carry it.",
           speed_cpu=2.5, speed_gpu=0.4, speed_source="measured",
-          measured_on="RX 9070 XT: 0,3 s · i5-13600KF auf 8 E-Cores: 2–3 s",
+          measured_on="RX 9070 XT: 0.3 s · i5-13600KF on 8 E-cores: 2-3 s",
           min_ram_mb=6144, min_vram_mb=3500),
     _qwen("4B", "Q4_K_M", 2500, "unsloth/Qwen3-4B-Instruct-2507-GGUF",
           "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-          blurb="Etwas kleiner und schneller als Q5, minimal ungenauer.",
+          blurb="Slightly smaller and faster than Q5, marginally less precise.",
           speed_cpu=3.0, speed_gpu=0.4, speed_source="estimated", min_ram_mb=5120,
           min_vram_mb=3000),
     _qwen("1.7B", "Q4_K_M", 1100, "unsloth/Qwen3-1.7B-GGUF", "Qwen3-1.7B-Q4_K_M.gguf",
-          blurb="Für schwache Rechner. Setzt Satzzeichen und entfernt Füllwörter, "
-                "hat Selbstkorrekturen im Test aber teilweise übersehen.",
+          blurb="For weak machines. Punctuates and strips filler words, but it "
+                "missed some self-corrections in testing.",
           speed_cpu=0.9, speed_gpu=0.2, speed_source="measured",
-          measured_on="i5-13600KF auf 8 E-Cores: 0,7 s",
+          measured_on="i5-13600KF on 8 E-cores: 0.7 s",
           min_ram_mb=3072, min_vram_mb=1600),
 ]
 
@@ -148,7 +146,7 @@ def of_kind(kind: str) -> list[Model]:
     return [m for m in CATALOG if m.kind == kind]
 
 
-# ------------------------------------------------------------- Empfehlung
+# --------------------------------------------------------- Recommendation
 
 @dataclass
 class Recommendation:
@@ -166,11 +164,11 @@ class Recommendation:
 
 
 def recommend(machine) -> Recommendation:
-    """Genau ein Vorschlag, in einem Satz begruendet.
+    """Exactly one suggestion, justified in a single sentence.
 
-    Grundsatz: Parakeet ist der Standard, weil es ueberall laeuft. Whisper
-    kommt nur ins Spiel, wenn eine Grafikkarte da ist, die es auch traegt -
-    auf der CPU ist es gemessen unbrauchbar (0,3x Echtzeit).
+    Principle: Parakeet is the default because it runs everywhere. Whisper only
+    enters the picture when there is a graphics card that can carry it — on CPU
+    it was measured at 0.3x real time, which is unusable for dictation.
     """
     ram = machine.ram_mb
     gpu = machine.best_gpu
@@ -183,35 +181,30 @@ def recommend(machine) -> Recommendation:
     bits: list[str] = []
 
     if gpu and vram >= 4000:
-        # Whisper waere moeglich - aber Parakeet bleibt der Vorschlag, weil es
-        # die GPU frei laesst. Whisper steht als Alternative bereit.
+        # Whisper would be viable, but Parakeet stays the suggestion because it
+        # leaves the graphics card alone. Whisper is offered as the alternative.
         alternatives.append(BY_ID["whisper-large-v3-turbo"])
-        bits.append(f"{gpu.name or gpu.vendor} mit {vram // 1024} GB erkannt")
+        bits.append(f"found {gpu.name or gpu.vendor} with {vram // 1024} GB")
     elif gpu and vram >= 1500:
         alternatives.append(BY_ID["whisper-large-v3-turbo-q5_0"])
 
-    # Redigier-Stufe: Grafikkarte bevorzugt, sonst CPU, sonst gar nicht.
     llm: Model | None = None
     llm_device = "cpu"
     if gpu and vram >= 5000 and ram >= 6144:
         llm, llm_device = BY_ID["qwen3-4b-q5_k_m"], "gpu"
-        bits.append("Selbstkorrektur läuft auf der Grafikkarte")
+        bits.append("self-correction runs on the graphics card")
     elif ram >= 12288 and cores >= 8:
         llm, llm_device = BY_ID["qwen3-4b-q5_k_m"], "cpu"
-        bits.append("Selbstkorrektur läuft auf dem Prozessor")
+        bits.append("self-correction runs on the processor")
     elif ram >= 6144 and cores >= 4:
         llm, llm_device = BY_ID["qwen3-1.7b-q4_k_m"], "cpu"
-        bits.append("kleines Sprachmodell für die Selbstkorrektur")
+        bits.append("a small language model handles self-correction")
     else:
-        bits.append("ohne Sprachmodell — Satzzeichen setzt Parakeet selbst")
+        bits.append("no language model — Parakeet punctuates on its own")
 
-    reason = ("Parakeet läuft auf jedem Prozessor schnell genug und lässt die "
-              "Grafikkarte in Ruhe; " + ", ".join(bits) + ".")
+    reason = ("Parakeet is fast enough on any processor and leaves the graphics "
+              "card alone; " + ", ".join(bits) + ".")
 
     return Recommendation(asr=asr, llm=llm, vad=None, reason=reason,
                           asr_device=asr_device, llm_device=llm_device,
                           alternatives=alternatives)
-
-
-if __name__ == "__main__":
-    from . import hardware  # pragma: no cover
