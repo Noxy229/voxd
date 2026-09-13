@@ -8,3 +8,5 @@ build/
 *.gguf
 *.onnx
 *.bin
+.venv/
+docs/images/*.part
