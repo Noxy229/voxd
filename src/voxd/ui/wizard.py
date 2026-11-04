@@ -109,27 +109,22 @@ class Step(QWidget):
 
 class WelcomeStep(Step):
     title = "voxd"
-    lead = ("Dictation that understands corrections. Press a key, speak, and the "
-            "text lands in the field — none of it leaves this machine.")
+    lead = ("Offline dictation with lightweight spelling correction. Press a key, "
+            "speak, and the text lands in the field — none of it leaves this machine.")
 
     def build(self):
         c = Card()
         c.box.setSpacing(S3)
-        c.box.addWidget(label("You can correct yourself mid-sentence:", "caption"))
-
-        for spoken, written in (
-            ("“…that the meeting is on Tuesday. No, Wednesday. "
-             "Wednesday at three.”",
-             "The meeting is on Wednesday at three."),
-            ("“The docs for the deployment script, actually no, scratch "
-             "that, the docs for the CI pipeline.”",
-             "I need the docs for the CI pipeline."),
-        ):
-            row = QVBoxLayout()
-            row.setSpacing(2)
-            row.addWidget(label(spoken, "caption", wrap=True))
-            row.addWidget(label(written, "", wrap=True))
-            c.box.addLayout(row)
+        c.box.addWidget(label("No language model needed for spelling", "section"))
+        c.box.addWidget(label(
+            "A bundled frequency dictionary fixes unambiguous lowercase typos. "
+            "Names, technical identifiers and ambiguous spellings stay unchanged. "
+            "Speech recognition uses a separate model selected from your hardware.",
+            "caption", wrap=True))
+        c.box.addWidget(label(
+            "Spoken self-corrections (‘Tuesday, no, Wednesday’) are not resolved "
+            "by the spelling algorithm. An optional LLM can still be configured.",
+            "caption", wrap=True))
         self.body.addWidget(c)
         self.body.addWidget(label(
             "Setup takes a few minutes. Everything here can be changed later.",
@@ -187,11 +182,11 @@ class RecommendStep(Step):
                 f"{rec.llm.title} — self-correction, on the {where}"))
             main.box.addWidget(label(rec.llm.blurb, "caption", wrap=True))
         else:
-            main.box.addWidget(label("No language model", ""))
+            main.box.addWidget(label("Offline dictionary spelling — no language model", ""))
             main.box.addWidget(label(
-                "Self-correction would need an extra model, and this machine is "
-                "too tight for one. Punctuation still works — the recogniser "
-                "does that itself.", "caption", wrap=True))
+                "A small bundled dictionary corrects unambiguous lowercase typos. "
+                "Names and ambiguous words stay unchanged. Spoken self-corrections "
+                "such as ‘no, Wednesday’ need the optional LLM mode.", "caption", wrap=True))
 
         self.body.addWidget(main)
         self.body.addWidget(label(rec.reason, "caption", wrap=True))
@@ -500,7 +495,7 @@ class Wizard(QWidget):
     def result(self) -> dict:
         asr = self.rec.asr if self.choice == "recommended" else catalog.get(self.choice)
         return {"asr": asr.id if asr else None,
-                "asr_device": self.rec.asr_device if self.choice == "recommended" else "gpu",
+                "asr_device": self.rec.asr_device,
                 "llm": self.rec.llm.id if self.rec.llm else None,
                 "llm_device": self.rec.llm_device,
                 "hotkey": self.hotkey_label,

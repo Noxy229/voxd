@@ -23,3 +23,6 @@ docs/images/*.part
 .pytest_cache/
 .ruff_cache/
 config.local.toml
+
+.build-venv/
+*.spec

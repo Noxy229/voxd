@@ -63,9 +63,11 @@ class HotkeyThread(threading.Thread):
         self.on_action = on_action
         self.failed: dict[str, str] = {}
         self._ready = threading.Event()
-        self._stop = False
+        self._stop_requested = False
+        self._native_thread_id = None
 
     def run(self):
+        self._native_thread_id = threading.get_native_id()
         ids = {}
         for i, (action, accel) in enumerate(self.bindings.items(), start=1):
             try:
@@ -81,7 +83,7 @@ class HotkeyThread(threading.Thread):
         self._ready.set()
 
         msg = wt.MSG()
-        while not self._stop and user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+        while not self._stop_requested and user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             if msg.message == WM_HOTKEY:
                 action = ids.get(msg.wParam)
                 if action:
@@ -96,8 +98,9 @@ class HotkeyThread(threading.Thread):
         self._ready.wait(timeout)
 
     def stop(self):
-        self._stop = True
-        user32.PostThreadMessageW(threading.get_ident(), 0x0012, 0, 0)  # WM_QUIT
+        self._stop_requested = True
+        if self._native_thread_id is not None:
+            user32.PostThreadMessageW(self._native_thread_id, 0x0012, 0, 0)  # WM_QUIT
 
 
 _thread: HotkeyThread | None = None
@@ -115,6 +118,7 @@ def apply(bindings: dict[str, str], command: str = "voxctl") -> BindResult:
 
     if _thread is not None:
         _thread.stop()
+        _thread.join(timeout=6)
     _thread = HotkeyThread(bindings, dispatch)
     _thread.start()
     _thread.wait_ready()
@@ -128,6 +132,7 @@ def remove(bindings: dict[str, str], command: str = "voxctl") -> BindResult:
     global _thread
     if _thread is not None:
         _thread.stop()
+        _thread.join(timeout=6)
         _thread = None
         return BindResult(True, "unregistered")
     return BindResult(False, "nothing registered")

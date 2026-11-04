@@ -90,7 +90,7 @@ def spoken_punctuation(text: str) -> str:
     return re.sub(r"[ \t]*\n[ \t]*", "\n", text).strip()
 
 
-def rule_based(text: str) -> str:
+def rule_based(text: str, capitalize: bool = True) -> str:
     """Used when no language model is configured.
 
     Deliberately timid: strip fillers, tidy spacing, capitalise sentences. It
@@ -100,7 +100,7 @@ def rule_based(text: str) -> str:
     out = _FILLER.sub("", spoken_punctuation(text)).strip()
     out = re.sub(r"\s+([,.!?;:])", r"\1", out)
     out = re.sub(r"[ \t]{2,}", " ", out)
-    if out and out[0].islower():
+    if capitalize and out and out[0].islower():
         out = out[0].upper() + out[1:]
     return out
 

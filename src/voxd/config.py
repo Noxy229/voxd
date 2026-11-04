@@ -67,7 +67,7 @@ def model_path(model_id: str) -> Path:
 DEFAULTS: dict = {
     "setup": {
         "completed": False,
-        "version": 2,
+        "version": 3,
     },
     "audio": {
         "device": "",               # empty = system default
@@ -84,7 +84,9 @@ DEFAULTS: dict = {
         # moderate - also removes filler words
         # strong   - also smooths into clean written prose
         "level": "strong",
-        "model": "qwen3-1.7b-q4_k_m",
+        "model": "",
+        "mode": "spelling",       # spelling | llm
+        "language": "de",
         "device": "cpu",
         "port": 8612,
         "idle_unload_sec": 0,  # 0 = stay resident until explicitly unloaded
@@ -155,6 +157,9 @@ class Config:
                 if editor.get("idle_unload_sec") == 90:
                     editor["idle_unload_sec"] = 0
                 saved.setdefault("setup", {})["version"] = 2
+            if saved.get("setup", {}).get("version", 1) < 3:
+                saved.setdefault("edit", {}).update(mode="spelling", model="", language="de")
+                saved.setdefault("setup", {})["version"] = 3
             cfg.data = _deep_merge(DEFAULTS, saved)
         except Exception as e:
             cfg.problem = f"{CONFIG_PATH} could not be read ({e}); using defaults"

@@ -20,3 +20,5 @@ jobs:
       - run: ruff check src tests
       - run: pytest -q
       - run: python -m build
+      - run: python tools/build_linux_installer.py
+      - run: dist/linux/voxd-linux.run --help

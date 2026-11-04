@@ -66,7 +66,7 @@ def test_finish_waits_for_download_and_returns_to_ui_thread(wizard, qt, monkeypa
     while not finished and time.monotonic() < deadline:
         qt.processEvents()
         time.sleep(0.005)
-    assert calls == ['parakeet-tdt-0.6b-v3-int8', 'qwen3-1.7b-q4_k_m']
+    assert calls == ['parakeet-tdt-0.6b-v3-int8', None]
     assert finished
     assert not wizard._downloading
 

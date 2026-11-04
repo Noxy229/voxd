@@ -8,6 +8,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "sherpa-onnx>=1.13",
     "numpy>=1.24",
+    "pyspellchecker>=0.8,<1",
     "PySide6>=6.6",
     "sounddevice>=0.4.6",
     "platformdirs>=4.0",
@@ -20,6 +21,7 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 [project.scripts]
 voxd = "voxd.__main__:main"
 voxctl = "voxd.cli:main"
+voxd-setup = "voxd.bootstrap:main"
 
 [build-system]
 requires = ["hatchling"]

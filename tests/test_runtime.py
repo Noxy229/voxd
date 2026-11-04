@@ -8,18 +8,19 @@ from voxd.session import Session
 
 def test_compact_defaults_and_residency():
     cfg = Config()
-    assert cfg.get('edit.model') == 'qwen3-1.7b-q4_k_m'
+    assert cfg.get('edit.model') == ''
+    assert cfg.get('edit.mode') == 'spelling'
     assert cfg.get('edit.idle_unload_sec') == 0
     machine = SimpleNamespace(ram_mb=32768, best_gpu=None,
                               cpu=SimpleNamespace(logical_cores=16))
-    assert catalog.recommend(machine).llm.id == cfg.get('edit.model')
+    assert catalog.recommend(machine).llm is None
 
 
-def test_preload_warms_both_models(monkeypatch):
+def test_preload_warms_recogniser_and_dictionary(monkeypatch):
     session = Session(Config(), inject_enabled=False)
     ready = threading.Event()
     monkeypatch.setattr(session, '_get_engine', lambda: SimpleNamespace(load=lambda: None))
-    monkeypatch.setattr(session.redactor, 'ensure', lambda: ready.set())
+    monkeypatch.setattr(session.spelling, 'load', lambda: ready.set())
     session.preload()
     assert ready.wait(1), 'editing model must load before the first recording'
     session.redactor.close()
@@ -61,7 +62,9 @@ def test_punctuation_commands_preserve_question_and_newline():
 
 
 def test_editor_cannot_silently_remove_question_or_requested_line_breaks(monkeypatch):
-    session = Session(Config(), inject_enabled=False)
+    cfg = Config()
+    cfg.set("edit.mode", "llm")
+    session = Session(cfg, inject_enabled=False)
     monkeypatch.setattr(type(session.redactor), 'enabled', property(lambda _: True))
     monkeypatch.setattr(session.redactor, 'edit', lambda raw: 'Die Datei schicken.')
     try:

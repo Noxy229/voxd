@@ -1,4 +1,7 @@
-# Release verification — 2026-11-04
+# Earlier release verification — 2026-11-04
+
+This report describes commit d6ab71e. The newer dictionary defaults and installers
+are documented in [INSTALLERS.md](INSTALLERS.md); Qwen is no longer the default.
 
 Implemented and locally checked; not a blanket certification for every desktop.
 

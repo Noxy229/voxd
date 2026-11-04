@@ -27,6 +27,7 @@ from .redact import (
     spoken_punctuation,
     within_bounds,
 )
+from .spelling import SpellingEditor
 
 MIN_RECORD_SEC = 0.35
 SILENCE_PEAK = 0.004        # below this the microphone is effectively dead
@@ -88,10 +89,11 @@ class Session:
                                  cfg.get("inject.focus_delay_ms", 40),
                                  log=self.log)
         self.redactor = self._build_redactor()
+        self.spelling = SpellingEditor(cfg.get("edit.language", "de"))
 
     # ------------------------------------------------------------ wiring
     def _build_redactor(self) -> Redactor:
-        model_id = self.cfg.get("edit.model")
+        model_id = self.cfg.get("edit.model") if self.cfg.get("edit.mode") == "llm" else None
         model = catalog.get(model_id) if model_id else None
         path = None
         if model and model.files:
@@ -133,9 +135,12 @@ class Session:
                     if self._closed:
                         return
                     self._get_engine().load()
-                    if self.cfg.get("edit.enabled", True) and not self.redactor.ensure():
-                        self.log("recogniser ready; editing model unavailable")
-                        return
+                    if self.cfg.get("edit.enabled", True):
+                        if self.cfg.get("edit.mode") == "spelling":
+                            self.spelling.load()
+                        elif not self.redactor.ensure():
+                            self.log("recogniser ready; editing model unavailable")
+                            return
                 self.log("models ready")
             except Exception as e:
                 self.log(f"recogniser could not be loaded: {e}")
@@ -186,7 +191,10 @@ class Session:
             self.log(f"recogniser not ready: {e}")
         with self._lock:
             if not self._closed and not self.raw_mode and self.cfg.get("edit.enabled", True):
-                self.redactor.ensure()
+                if self.cfg.get("edit.mode") == "spelling":
+                    self.spelling.load()
+                else:
+                    self.redactor.ensure()
 
     def _on_block(self, chunk: bytes):
         if self.recording:
@@ -302,6 +310,12 @@ class Session:
     def _edit(self, raw: str) -> tuple[str, str, float]:
         raw = spoken_punctuation(raw)
         t0 = time.time()
+        if self.cfg.get("edit.mode") == "spelling":
+            try:
+                return self.spelling.edit(raw), "dictionary + rules", time.time() - t0
+            except Exception as e:
+                self.log(f"spelling unavailable: {type(e).__name__}")
+                return rule_based(raw), "punctuation only", time.time() - t0
         if not self.redactor.enabled:
             # No model configured: do the little that can be done honestly,
             # and say so rather than implying corrections were applied.
@@ -349,6 +363,8 @@ class Session:
                 return False
             self.release()
             self.redactor.close()
+            self.spelling.unload()
+            self.spelling = SpellingEditor(cfg.get("edit.language", "de"))
             self.cfg = cfg
             self.redactor = self._build_redactor()
             self.injector = Injector(INJECT_CACHE, cfg.get("inject.order"),
@@ -375,6 +391,7 @@ class Session:
             if self._engine is not None:
                 self._engine.unload()
             self.redactor.unload()
+            self.spelling.unload()
         return True
 
     def status(self) -> dict:
@@ -382,7 +399,8 @@ class Session:
             "recording": self.recording,
             "engine": self.cfg.get("asr.model"),
             "engine_loaded": bool(self._engine and self._engine.loaded),
-            "editing": self.cfg.get("edit.level") if self.redactor.enabled
+            "editing": "dictionary + rules" if self.cfg.get("edit.mode") == "spelling"
+                       else self.cfg.get("edit.level") if self.redactor.enabled
                        else f"off ({self.redactor.why_unavailable()})",
             "busy": self._busy,
         }

@@ -23,7 +23,8 @@ from .ui.overlay import Overlay
 
 
 def log(*parts):
-    print("[voxd]", *parts, file=sys.stderr, flush=True)
+    if sys.stderr is not None:
+        print("[voxd]", *parts, file=sys.stderr, flush=True)
 
 
 class Bridge(QObject):
@@ -62,13 +63,19 @@ class Application:
         self.server = ipc.Server(handlers, log=log)
         self.server.start()
 
+        if sys.platform == "win32":
+            from . import hotkeys
+            result = hotkeys.apply({k: self.cfg.get(f"hotkeys.{k}")
+                                    for k in ("toggle", "raw", "cancel")})
+            if not result.ok:
+                log(result.how, result.manual_hint)
         self.wizard = None
         if not self.cfg.get("setup.completed", False):
             QTimer.singleShot(0, self.open_setup)
         else:
             from .download import is_installed
             needed = [self.cfg.get("asr.model")]
-            if self.cfg.get("edit.enabled"):
+            if self.cfg.get("edit.enabled") and self.cfg.get("edit.mode") == "llm":
                 needed.append(self.cfg.get("edit.model"))
             if not all(is_installed(mid) for mid in needed):
                 QTimer.singleShot(0, self.open_setup)
@@ -191,7 +198,10 @@ class Application:
         device = choices.get("audio_device")
         self.cfg.set("audio.device", device if device is not None else "")
         self.cfg.set("edit.idle_unload_sec", 0)
-        self.cfg.set("edit.enabled", bool(choices.get("llm")))
+        self.cfg.set("edit.enabled", True)
+        self.cfg.set("edit.mode", "spelling")
+        self.cfg.set("edit.model", "")
+        self.cfg.set("setup.version", 3)
         self.cfg.set("setup.completed", True)
         self.cfg.save()
         if not self.session.reconfigure(self.cfg):
@@ -252,6 +262,9 @@ class Application:
         return "ok"
 
     def quit(self):
+        if sys.platform == "win32":
+            from . import hotkeys
+            hotkeys.remove({})
         self.server.stop()
         self.session.close()
         self.qt.quit()

@@ -13,6 +13,8 @@ def main(argv: list[str] | None = None) -> int:
               "  voxd            start the daemon (setup runs on first launch)\n"
               "  voxd --setup    force the setup window open\n"
               "  voxd --version  print the version\n\n"
+              "  voxd --install-models --apply  hardware setup + downloads\n"
+              "  voxd --ctl status              control (also works in Windows bundle)\n\n"
               "Control a running daemon with voxctl.")
         return 0
 
@@ -20,6 +22,13 @@ def main(argv: list[str] | None = None) -> int:
         from . import __version__
         print(__version__)
         return 0
+
+    if args and args[0] == "--install-models":
+        from .bootstrap import main as setup
+        return setup(args[1:])
+    if args and args[0] == "--ctl":
+        from .cli import main as control
+        return control(args[1:])
 
     from . import ipc
     if ipc.daemon_running():

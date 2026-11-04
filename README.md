@@ -1,122 +1,154 @@
 # voxd
 
-Local dictation for Linux and Windows. Audio stays on the machine. Models are
-fetched from Hugging Face during setup; dictation works offline afterwards.
+Offline dictation for Linux and Windows, with lightweight spelling correction.
+Speech recognition weights are downloaded during installation. Dictation and
+correction run locally afterwards.
 
 ## Install
 
-Python 3.10 or newer:
+### Windows 10/11 x64
+
+Run **voxd-bootstrap-0.1.0-x64.exe**. The setup wizard installs Python 3.12 per user
+if needed, an isolated application environment, Python/native-wheel dependencies,
+Start menu shortcuts and the selected speech weights. It offers an optional
+login startup entry. No system-wide Python PATH changes or administrator account
+are required. Internet is needed during installation. Python installation uses
+winget or an Authenticode-verified installer from python.org when winget is absent.
+
+From a source checkout or extracted source archive, the same installation is:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+# Force recognition weights below 1 GB:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Compact
+```
+
+Installation lives under `%LOCALAPPDATA%\Programs\voxd`. Start **voxd** from the
+Start menu; **Uninstall voxd** removes the application but retains models and
+settings. With the EXE bootstrap, Windows Installed Apps also lists voxd.
+A detailed bootstrap log is written to `%TEMP%\voxd-install.log`.
+Microphone access must be enabled in Windows Privacy settings.
+
+The separate fully bundled installer (`voxd-setup-…-x64.exe`) can be built on
+Windows and needs no preinstalled Python. See [installer builds](docs/INSTALLERS.md).
+The bootstrap EXE is compiled and available locally; actual installation on a
+real Windows machine remains to be tested.
+
+### Linux
+
+Run the self-extracting **voxd-linux.run**, or from the source folder:
 
 ```bash
 ./install.sh
+# Optional: keep speech weights below 1 GB, start at login:
+./install.sh --compact --autostart
 ```
 
-Or install manually:
+The installer installs system dependencies through apt, pacman, dnf or zypper
+(using sudo for those packages), creates a private environment, downloads speech
+weights and adds application/menu launchers. Run it as your desktop user.
+`--no-system-deps` skips distribution package installation; Python 3.10+, venv,
+PortAudio and the Qt/input libraries must then already exist. `--english` selects
+an English correction dictionary; the default is German.
 
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -e .
-.venv/bin/voxd
-```
+The application environment is under `$XDG_DATA_HOME/voxd/app` (normally
+`~/.local/share/voxd/app`). Launch via the app menu or `~/.local/bin/voxd`.
+Uninstall with `~/.local/share/voxd/app/uninstall.sh` (adjust for XDG_DATA_HOME).
+Models and configuration survive uninstall. The installer does not install GPU
+drivers or modify kernel input permissions.
 
-First launch detects hardware, tests the microphone and downloads the selected
-models. Download errors leave setup open for retry. `llama-server` from
-[llama.cpp](https://github.com/ggml-org/llama.cpp) must be on PATH for the optional
-editing pass. Parakeet runs in-process through sherpa-onnx. Linux audio needs
-PortAudio, or a PipeWire/PulseAudio capture tool.
+## Correction without an LLM
 
-## Compact, resident models
+The default editing pass uses [pyspellchecker](https://pyspellchecker.readthedocs.io/)
+and a bundled frequency dictionary. The compressed German dictionary is about
+**1.1 MB**, rather than the previous 1.1 GB Qwen weights. It is loaded once in the
+background and reused. It fixes only unambiguous lowercase typos within one edit
+step and ignores very rare proposed corrections. Names, ambiguous spellings,
+URLs, email addresses, inline code, paths and identifiers are preserved.
+Explicit commands such as “Fragezeichen” / “question mark” and “neue Zeile” /
+“new line” are converted by rules.
 
-The default recogniser is Parakeet TDT 0.6B v3 **INT8**, approximately 642 MB of
-weights. The default editor is **Qwen3 1.7B Q4_K_M**, approximately 1.1 GB,
-replacing the previous 4B Q5_K_M default (approximately 2.78 GB).
-These are prequantised upstream weights; voxd does not recompress them itself.
-Runtime memory also includes inference state, the context cache and Qt.
+This is conservative spelling cleanup, not a grammar engine. It cannot resolve
+arbitrary spoken self-corrections such as “Tuesday, no, Wednesday”. The old LLM
+mode remains available through `edit.mode = "llm"` and an explicit catalogue
+model plus llama-server installation, but is never downloaded by the default
+installer. Older version-1/2 settings migrate to dictionary editing. Existing LLM
+weights are retained on disk so custom configurations are not deleted.
 
-Both models preload in the background after setup and remain loaded until
-`voxctl release` or exit. `edit.idle_unload_sec = 0` disables idle eviction;
-a positive value opts back into eviction. The editor uses a 4096-token context.
-The initial process launch still needs loading time. Once ready, repeated
-activation avoids loading weights again; transcription and editing still take time.
+## Hardware and speech weights
 
-The smaller editor can miss corrections that the 4B editor catches. A length
-check rejects unusually short or long edits, but cannot detect every semantic
-mistake. Raw dictation bypasses editing. Larger models remain in the catalogue
-for explicit configuration. Systems below 6 GB RAM or four logical CPUs are
-recommended recognition without an editor. Version-1 settings using the old
-4B default migrate to the compact preset; missing weights reopen setup.
+The installer checks CPU threads, RAM, GPU vendor and reported VRAM before
+choosing speech recognition precision:
 
-Upstream model files: [Qwen3 1.7B GGUF](https://huggingface.co/unsloth/Qwen3-1.7B-GGUF),
-[Parakeet INT8](https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8).
+- Normal or unknown-capacity machines: **Parakeet TDT 0.6B v3 INT8**, about 642 MB.
+- At least 24 GB RAM, 8 threads and a reported GPU with at least 8 GB VRAM:
+  **Parakeet full precision**, about 2.55 GB including `encoder.weights`.
+- `--compact` / `-Compact` always forces INT8, including on powerful machines.
+
+The extra large download is speech recognition, not spelling correction. Both
+presets currently run on the CPU through the bundled sherpa-onnx runtime. GPU
+recognition is not implied by GPU detection. Higher precision is not a guarantee
+of better recognition; compare with your real speech before choosing it for
+quality. The default INT8 recogniser already supports German and English.
+Models are preloaded when voxd starts and stay resident until explicit release
+or exit. Initial application startup still has a load time; repeated recording
+activation does not reload weights. Runtime RAM exceeds model file size.
+
+Model sources: [Parakeet INT8](https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8),
+[Parakeet full precision](https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3).
 
 ## KDE Plasma
 
-Plasma Wayland and X11 have explicit setup and injection paths. Full end-to-end
-operation still needs verification on the target desktop and applications.
-
-On **Plasma Wayland**, install `wl-clipboard` and `ydotool`, then configure your
-distribution's `ydotoold` service and uinput permissions. voxd first copies the
-Unicode transcript and sends Ctrl+V through ydotool. If key injection is
-unavailable, text remains in the clipboard for manual Ctrl+V. `wtype` is not a
-required Plasma dependency: KWin does not provide its virtual-keyboard route.
-`xdotool` is reserved for X11 and is not used as a misleading Wayland fallback.
-
-At the end of setup, voxd creates three application launchers using the absolute
-`voxctl` path. Open **System Settings → Keyboard → Shortcuts → Add New → Application**,
-search for **voxd**, and assign:
+On Plasma Wayland the installer creates application launchers. Assign them in
+**System Settings → Keyboard → Shortcuts → Add New → Application**:
 
 | Action | Suggested shortcut | Command |
 |---|---|---|
 | Start/finish dictation | Meta+H | `voxctl toggle` |
-| Dictate without editing | Meta+Shift+H | `voxctl raw-toggle` |
-| Discard recording | Meta+Alt+H | `voxctl cancel` |
+| Dictate raw | Meta+Shift+H | `voxctl raw-toggle` |
+| Discard | Meta+Alt+H | `voxctl cancel` |
 
-KDE resolves conflicts in its native UI; voxd does not overwrite existing global
-shortcuts. GNOME, Hyprland and Sway have separate shortcut backends. Other desktops
-receive manual binding instructions. niri and river do not have automatic backends.
+Automatic Unicode paste requires `wl-clipboard` plus a running `ydotoold` with
+uinput access. The packages are installed, but service and permission setup
+varies by distribution. Without it, the transcript stays in the clipboard for
+manual Ctrl+V. Plasma uses tray status, avoiding Qt overlay focus theft on KWin.
+`xdotool` is reserved for X11. Klipper may retain transcripts in clipboard history.
+Clipboard restoration preserves previous text, not arbitrary MIME data.
 
-Plasma Wayland uses tray status and error notifications. A real KWin smoke test
-showed that Qt's ordinary overlay stole keyboard focus despite its no-focus flag;
-that surface is therefore suppressed on Plasma Wayland. A native layer-shell
-overlay remains future work. Other sessions use the noninteractive overlay.
-Clipboard managers such as Klipper may retain dictated text. voxd does not delete
-clipboard history. Successful paste restores previous nonempty text clipboard
-contents; arbitrary MIME formats and clipboard-manager history are not preserved.
+Windows registers shortcuts at each application startup. Existing shortcut
+conflicts are reported; no exclusive shortcut availability is assumed.
 
-## Controls and settings
+## Settings and control
 
-`voxd` starts the tray application. `voxd --setup` reopens setup. `voxctl status`
-reports model and session state; `voxctl release` explicitly frees model memory.
-The next recording loads it again. `voxctl quit` shuts down capture and workers
-before unloading models. A new dictation is ignored while the previous result
-is being processed, to prevent cross-talk and insertion into the wrong session.
+`voxd --setup` opens microphone/settings setup. `voxctl status`, `voxctl release`
+and `voxctl quit` control the running instance. The frozen Windows application
+also accepts `voxd.exe --ctl status`. `voxd-setup` or
+`python -m voxd.bootstrap` prints the hardware plan without downloading;
+`--apply` installs weights and saves settings after successful download.
 
-Settings use the platform's configuration directory (on Linux,
-`$XDG_CONFIG_HOME/voxd/config.toml`, normally `~/.config/voxd/config.toml`).
-Downloaded weights live in the corresponding data directory. To start on login,
-add `voxd` through Plasma's **Autostart** settings using its installed absolute path.
+Linux settings: `~/.config/voxd/config.toml`; models:
+`~/.local/share/voxd/models` (XDG overrides respected).
+Windows settings and models: `%APPDATA%\voxd\config` and `%APPDATA%\voxd\data`.
+Normal logs and status do not include transcript text. Recordings are capped at
+ten minutes; level monitoring retains no audio.
 
-Audio recordings are capped at ten minutes. Microphone level monitoring does not
-retain audio. Transcripts are kept in memory for raw reinsertion, but are not
-included in normal completion logs or `voxctl status`.
-
-## Development and verification
+## Development
 
 ```bash
+python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]' build
 QT_QPA_PLATFORM=offscreen .venv/bin/pytest
 .venv/bin/ruff check src tests
 .venv/bin/python -m build
+.venv/bin/python tools/build_linux_installer.py
 ```
 
-Tests cover model residency wiring, configuration migration, session concurrency,
-shutdown, Plasma launchers and paste fallback, download truncation, IPC, and Qt
-setup behavior. Offscreen tests cannot prove real KWin focus, portal behavior,
-ydotool permissions or dictation accuracy. Windows code is not hardware verified.
-See [release verification](docs/RELEASE.md) before publishing.
+See [installer build/testing instructions](docs/INSTALLERS.md) and the earlier
+[release verification notes](docs/RELEASE.md). No repository was made public.
+The prior historical-author-email finding still applies before publication.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Dependencies and model weights retain their own
-licenses: sherpa-onnx (Apache-2.0), Parakeet weights (CC-BY-4.0), Qwen3 (Apache-2.0),
-Qt/PySide6 (LGPL-3.0), llama.cpp and whisper.cpp (MIT).
+MIT — see [LICENSE](LICENSE). Dependencies/model weights retain their licenses:
+sherpa-onnx (Apache-2.0), Parakeet weights (CC-BY-4.0), pyspellchecker (MIT),
+Qt/PySide6 (LGPL-3.0), optional Qwen3 (Apache-2.0), llama.cpp/whisper.cpp (MIT).

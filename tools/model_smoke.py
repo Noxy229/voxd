@@ -16,6 +16,8 @@ def main():
         port = sock.getsockname()[1]
     cfg = Config()
     cfg.set('edit.port', port)
+    cfg.set('edit.mode', 'llm')
+    cfg.set('edit.model', 'qwen3-1.7b-q4_k_m')
     session = Session(cfg, Callbacks(on_log=lambda *args: None), inject_enabled=False)
     try:
         start = time.monotonic()

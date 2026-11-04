@@ -86,6 +86,14 @@ CATALOG: list[Model] = [
         speed_cpu=15.0, speed_gpu=None, speed_source="measured",
         measured_on="i5-13600KF, 8 threads: 15x real time · only 2 cores: 5x real time",
         min_ram_mb=2048),
+    Model(id="parakeet-tdt-0.6b-v3-fp32", kind="asr", engine="parakeet",
+          title="Parakeet TDT v3 (full precision)",
+          blurb="Full precision weights for machines with generous memory. CPU inference; "
+                "higher precision is not a guarantee of better transcripts.",
+          files=[ModelFile(name, f"{HF}/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3/resolve/main/{name}", size)
+                 for name, size in [("encoder.onnx", 42), ("encoder.weights", 2436),
+                                    ("decoder.onnx", 48), ("joiner.onnx", 26), ("tokens.txt", 1)]],
+          min_ram_mb=8192, license="CC-BY-4.0 (NVIDIA)"),
     _whisper(
         "large-v3-turbo", 1625, "Whisper large-v3-turbo",
         blurb="Highest accuracy on rare words and difficult audio. Needs a "
@@ -164,41 +172,17 @@ class Recommendation:
 
 
 def recommend(machine) -> Recommendation:
-    """Exactly one suggestion, justified in a single sentence.
+    """Choose precision by capacity; correction is dictionary-based on every tier.
 
-    Principle: Parakeet is the default because it runs everywhere. Whisper only
-    enters the picture when there is a graphics card that can carry it — on CPU
-    it was measured at 0.3x real time, which is unusable for dictation.
+    VRAM is a capacity signal, not a claim that the bundled CPU runtime can
+    accelerate this graph. Unknown GPU capacity stays on the compact preset.
     """
-    ram = machine.ram_mb
     gpu = machine.best_gpu
-    vram = (gpu.vram_mb or 0) if gpu else 0
-    cores = machine.cpu.logical_cores
-
-    asr = BY_ID["parakeet-tdt-0.6b-v3-int8"]
-    asr_device = "cpu"
-    alternatives: list[Model] = []
-    bits: list[str] = []
-
-    if gpu and vram >= 4000:
-        # Whisper would be viable, but Parakeet stays the suggestion because it
-        # leaves the graphics card alone. Whisper is offered as the alternative.
-        alternatives.append(BY_ID["whisper-large-v3-turbo"])
-        bits.append(f"found {gpu.name or gpu.vendor} with {vram // 1024} GB")
-    elif gpu and vram >= 1500:
-        alternatives.append(BY_ID["whisper-large-v3-turbo-q5_0"])
-
-    llm: Model | None = None
-    llm_device = "cpu"
-    if ram >= 6144 and cores >= 4:
-        llm = BY_ID["qwen3-1.7b-q4_k_m"]
-        bits.append("a compact 4-bit editor stays loaded on the processor")
-    else:
-        bits.append("no language model — Parakeet punctuates on its own")
-
-    reason = ("Parakeet is fast enough on any processor and leaves the graphics "
-              "card alone; " + ", ".join(bits) + ".")
-
-    return Recommendation(asr=asr, llm=llm, vad=None, reason=reason,
-                          asr_device=asr_device, llm_device=llm_device,
-                          alternatives=alternatives)
+    generous = machine.ram_mb >= 24576 and machine.cpu.logical_cores >= 8
+    generous = generous and gpu is not None and (gpu.vram_mb or 0) >= 8192
+    asr = BY_ID["parakeet-tdt-0.6b-v3-fp32" if generous else "parakeet-tdt-0.6b-v3-int8"]
+    reason = ("Full precision selected from RAM, cores and GPU VRAM; recognition still runs "
+              "on CPU. No editing language model is needed." if generous else
+              "Compact INT8 recognition on CPU; dictionary spelling correction uses no LLM.")
+    return Recommendation(asr=asr, llm=None, vad=None, reason=reason,
+                          alternatives=[BY_ID["parakeet-tdt-0.6b-v3-int8"]] if generous else [])

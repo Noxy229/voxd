@@ -1,0 +1,27 @@
+name: Windows installer
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  setup:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - run: choco install innosetup --yes --no-progress
+      - shell: pwsh
+        run: ./packaging/windows/build.ps1
+      - shell: pwsh
+        run: |
+          $process = Start-Process dist/windows/voxd/voxd.exe -ArgumentList '--version' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Frozen executable smoke failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voxd-windows-x64
+          path: dist/windows/*-x64.exe
