@@ -13,16 +13,21 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 
 from . import audio, catalog
-from .config import Config, INJECT_CACHE, MODEL_DIR
-from .engines import Engine, EngineError, build as build_engine
+from .config import INJECT_CACHE, MODEL_DIR, Config
+from .engines import Engine, EngineError
+from .engines import build as build_engine
 from .inject import Injector
-from .redact import Redactor, RedactionUnavailable, rule_based, within_bounds
+from .redact import (
+    RedactionUnavailable,
+    Redactor,
+    rule_based,
+    spoken_punctuation,
+    within_bounds,
+)
 
-MAX_RECORD_SEC = 600
 MIN_RECORD_SEC = 0.35
 SILENCE_PEAK = 0.004        # below this the microphone is effectively dead
 
@@ -64,6 +69,7 @@ class Session:
         self.log = self.cb.on_log
 
         self.recording = False
+        self.suspended = False
         self.raw_mode = False
         self.last: Result | None = None
 
@@ -71,7 +77,11 @@ class Session:
         self._stop_time = 0.0
         self._engine: Engine | None = None
         self._engine_key: tuple | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._control = threading.RLock()
+        self._busy = False
+        self._closed = False
+        self._workers = set()
 
         self.injector = Injector(INJECT_CACHE,
                                  cfg.get("inject.order"),
@@ -88,9 +98,9 @@ class Session:
             path = MODEL_DIR / model.id / model.files[0].name
         return Redactor(path,
                         level=self.cfg.get("edit.level", "strong"),
-                        device=self.cfg.get("edit.device", "gpu"),
+                        device=self.cfg.get("edit.device", "cpu"),
                         port=self.cfg.get("edit.port", 8612),
-                        idle_unload_sec=self.cfg.get("edit.idle_unload_sec", 90),
+                        idle_unload_sec=self.cfg.get("edit.idle_unload_sec", 0),
                         log=self.log)
 
     def _get_engine(self) -> Engine:
@@ -119,49 +129,74 @@ class Session:
         slower than every later one."""
         def run():
             try:
-                self._get_engine().load()
-                self.log("recogniser ready")
+                with self._lock:
+                    if self._closed:
+                        return
+                    self._get_engine().load()
+                    if self.cfg.get("edit.enabled", True) and not self.redactor.ensure():
+                        self.log("recogniser ready; editing model unavailable")
+                        return
+                self.log("models ready")
             except Exception as e:
                 self.log(f"recogniser could not be loaded: {e}")
-        threading.Thread(target=run, daemon=True).start()
+        self._spawn(run)
 
     # ---------------------------------------------------------- control
     def toggle(self, raw: bool = False):
+        with self._control:
+            return self._toggle(raw)
+
+    def _toggle(self, raw: bool = False):
         if self.recording:
             self.stop()
         else:
             self.start(raw)
 
     def start(self, raw: bool = False):
-        if self.recording:
+        with self._control:
+            return self._start(raw)
+
+    def _start(self, raw: bool = False):
+        if self.recording or self._busy or self._closed or self.suspended:
             return
         self.raw_mode = raw
         self.recording = True
-        device = self.cfg.get("audio.device") or None
+        device = self.cfg.get("audio.device")
+        if device == "":
+            device = None
         self._recorder = audio.Recorder(device, on_block=self._on_block)
         self._recorder.start()
         if self._recorder.error:
             self.recording = False
+            self._recorder.stop()
             self.cb.on_state("problem", f"Cannot record: {self._recorder.error}", 0.0)
             return
         self.cb.on_state("listening", "", 0.0)
         # Loading the models while the user is still speaking is what keeps a
         # cold start from costing anything noticeable.
-        threading.Thread(target=self._warm, daemon=True).start()
+        self._spawn(self._warm)
 
     def _warm(self):
         try:
-            self._get_engine().load()
+            with self._lock:
+                if self._closed:
+                    return
+                self._get_engine().load()
         except Exception as e:
             self.log(f"recogniser not ready: {e}")
-        if not self.raw_mode and self.cfg.get("edit.enabled", True):
-            self.redactor.ensure()
+        with self._lock:
+            if not self._closed and not self.raw_mode and self.cfg.get("edit.enabled", True):
+                self.redactor.ensure()
 
     def _on_block(self, chunk: bytes):
         if self.recording:
             self.cb.on_state("listening", "", audio.peak(chunk))
 
     def cancel(self):
+        with self._control:
+            return self._cancel()
+
+    def _cancel(self):
         if not self.recording:
             return
         self.recording = False
@@ -171,16 +206,32 @@ class Session:
         self.cb.on_state("cancelled", "", 0.0)
 
     def stop(self):
+        with self._control:
+            return self._stop()
+
+    def _stop(self):
         if not self.recording:
             return
         self.recording = False
         self._stop_time = time.time()
         pcm = self._recorder.stop() if self._recorder else b""
         self._recorder = None
-        threading.Thread(target=self._finish, args=(pcm,), daemon=True).start()
+        self._busy = True
+        raw_mode = self.raw_mode
+        def finish():
+            try:
+                with self._lock:
+                    self._finish(pcm, raw_mode)
+            except Exception as e:
+                self.log(f"dictation failed: {type(e).__name__}")
+                self.cb.on_state("problem", "Dictation failed", 0.0)
+            finally:
+                with self._control:
+                    self._busy = False
+        self._spawn(finish)
 
     # ----------------------------------------------------------- pipeline
-    def _finish(self, pcm: bytes):
+    def _finish(self, pcm: bytes, raw_mode: bool = False):
         result = Result()
         result.seconds = len(pcm) / (audio.SAMPLE_RATE * 2)
 
@@ -200,7 +251,8 @@ class Session:
 
         self.cb.on_state("thinking", "", 0.0)
         try:
-            transcript = self._get_engine().transcribe(pcm)
+            with self._lock:
+                transcript = self._get_engine().transcribe(pcm)
         except Exception as e:
             result.error = f"recognition failed: {e}"
             self.log(result.error)
@@ -217,12 +269,14 @@ class Session:
             return
 
         result.final, result.note = result.raw, "raw"
-        want_edit = not self.raw_mode and self.cfg.get("edit.enabled", True)
+        want_edit = not raw_mode and self.cfg.get("edit.enabled", True)
         if want_edit:
             self.cb.on_state("thinking", result.raw, 0.0)
             result.final, result.note, result.edit_seconds = self._edit(result.raw)
 
         self.last = result
+        if self._closed:
+            return
         self.cb.on_state("done", result.final, 0.0)
         if not self.inject_enabled:
             result.method, result.app = "disabled", ""
@@ -242,11 +296,11 @@ class Session:
             self.cb.on_state("problem", "Could not type — text is in the clipboard", 0.0)
 
         self.log(f"done in {result.total_seconds:.2f}s "
-                 f"[{transcript.engine}/{result.note}/{result.method}] "
-                 f"{result.final[:60]!r}")
+                 f"[{transcript.engine}/{result.note}/{result.method}]")
         self.cb.on_result(result)
 
     def _edit(self, raw: str) -> tuple[str, str, float]:
+        raw = spoken_punctuation(raw)
         t0 = time.time()
         if not self.redactor.enabled:
             # No model configured: do the little that can be done honestly,
@@ -275,12 +329,53 @@ class Session:
         if self.last and self.last.raw:
             self.injector.inject(self.last.raw)
 
+    def _spawn(self, target):
+        def run():
+            try:
+                target()
+            finally:
+                with self._control:
+                    self._workers.discard(threading.current_thread())
+        worker = threading.Thread(target=run, daemon=True)
+        with self._control:
+            if self._closed:
+                return
+            self._workers.add(worker)
+            worker.start()
+
+    def reconfigure(self, cfg):
+        with self._control:
+            if self.recording or self._busy or self._workers:
+                return False
+            self.release()
+            self.redactor.close()
+            self.cfg = cfg
+            self.redactor = self._build_redactor()
+            self.injector = Injector(INJECT_CACHE, cfg.get("inject.order"),
+                                     cfg.get("inject.focus_delay_ms", 40), log=self.log)
+        self.preload()
+        return True
+
+    def close(self):
+        with self._control:
+            self._closed = True
+            self.cancel()
+            workers = list(self._workers)
+        for worker in workers:
+            worker.join()
+        self.release()
+        self.redactor.close()
+
     def release(self):
         """Drop everything from memory — models included."""
+        with self._control:
+            if self.recording or self._busy or self._workers:
+                return False
         with self._lock:
             if self._engine is not None:
                 self._engine.unload()
-        self.redactor.unload()
+            self.redactor.unload()
+        return True
 
     def status(self) -> dict:
         return {
@@ -289,5 +384,5 @@ class Session:
             "engine_loaded": bool(self._engine and self._engine.loaded),
             "editing": self.cfg.get("edit.level") if self.redactor.enabled
                        else f"off ({self.redactor.why_unavailable()})",
-            "last": (self.last.final[:80] if self.last else ""),
+            "busy": self._busy,
         }

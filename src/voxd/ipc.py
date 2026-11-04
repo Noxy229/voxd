@@ -42,7 +42,9 @@ class Server:
         self._stop = threading.Event()
 
     def start(self):
-        runtime_dir().mkdir(parents=True, exist_ok=True)
+        runtime_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
+        if not IS_WINDOWS:
+            runtime_dir().chmod(0o700)
         if IS_WINDOWS:
             self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -50,10 +52,14 @@ class Server:
             port_path().write_text(str(self._sock.getsockname()[1]), "utf-8")
         else:
             p = socket_path()
-            p.unlink(missing_ok=True)
+            if p.exists():
+                if daemon_running():
+                    raise RuntimeError("voxd is already running")
+                p.unlink(missing_ok=True)
             self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self._sock.bind(str(p))
             p.chmod(0o600)
+        self._sock.settimeout(0.5)
         self._sock.listen(8)
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self._thread.start()
@@ -63,9 +69,12 @@ class Server:
         while not self._stop.is_set():
             try:
                 conn, _ = self._sock.accept()
+            except socket.timeout:
+                continue
             except OSError:
                 break
             try:
+                conn.settimeout(2)
                 cmd = conn.recv(512).decode("utf-8", "replace").strip()
                 handler = self.handlers.get(cmd)
                 if handler is None:

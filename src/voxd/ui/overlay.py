@@ -11,13 +11,14 @@ into the overlay instead of the target field.
 from __future__ import annotations
 
 import math
+import os
 import sys
 
-from PySide6.QtCore import Qt, QTimer, QRectF, QPointF, Property, QPropertyAnimation
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QGuiApplication
+from PySide6.QtCore import QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath
 from PySide6.QtWidgets import QWidget
 
-from .theme import DARK, FONT_MD, Palette, S2, S3, S4
+from .theme import DARK, FONT_MD, S3, S4, Palette
 
 BARS = 14              # bars in the level meter
 BAR_W = 2
@@ -33,6 +34,11 @@ class Overlay(QWidget):
     def __init__(self, palette: Palette = DARK):
         super().__init__(None)
         self.p = palette
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+        # KWin activates an ordinary xdg_toplevel even with Qt's no-focus hint.
+        # Never sacrifice the dictation target to a cosmetic status surface.
+        self.tray_only = (QGuiApplication.platformName() == "wayland"
+                          and any(d in desktop for d in ("kde", "plasma")))
         self.state = "idle"
         self.text = ""
         self.levels = [0.0] * BARS
@@ -42,9 +48,9 @@ class Overlay(QWidget):
         self.setWindowFlags(
             Qt.FramelessWindowHint
             | Qt.WindowStaysOnTopHint
-            | Qt.Tool                       # no taskbar entry, no focus
+            | Qt.Tool                       # no taskbar entry
             | Qt.WindowDoesNotAcceptFocus
-            | Qt.BypassWindowManagerHint
+            | Qt.WindowTransparentForInput
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
@@ -75,6 +81,7 @@ class Overlay(QWidget):
 
     def show_thinking(self, text: str = ""):
         self.state = "thinking"
+        self._hide_timer.stop()
         if text:
             self.text = text
         self._appear()
@@ -109,6 +116,8 @@ class Overlay(QWidget):
     # ---------------------------------------------------------- Internals
 
     def _appear(self):
+        if self.tray_only:
+            return
         self._relayout()
         if not self.isVisible():
             self.show()
@@ -122,8 +131,12 @@ class Overlay(QWidget):
         w = S4 + meter_w + S3 + text_w + S4
         w = max(MIN_W, min(MAX_W, w))
 
-        screen = QGuiApplication.screenAt(self.pos()) or QGuiApplication.primaryScreen()
+        from PySide6.QtGui import QCursor
+        screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
         geo = screen.availableGeometry()
+        w = min(w, max(1, geo.width() - 24))
         self.resize(w, CAPSULE_H)
         self.move(geo.center().x() - w // 2, geo.bottom() - CAPSULE_H - 96)
 
@@ -207,7 +220,7 @@ def attach_layer_shell(win: QWidget) -> bool:
     if not sys.platform.startswith("linux"):
         return False
     try:
-        from ctypes import CDLL, c_void_p, c_int
+        from ctypes import CDLL
         lib = CDLL("libgtk4-layer-shell.so")   # availability probe only
         _ = lib
     except OSError:

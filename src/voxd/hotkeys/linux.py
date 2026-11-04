@@ -43,7 +43,7 @@ def describe() -> str:
     if "gnome" in d:
         return "GNOME (custom keybindings via gsettings)"
     if "kde" in d or "plasma" in d:
-        return "KDE Plasma (must be added by hand)"
+        return "KDE Plasma (launchers + System Settings → Keyboard → Shortcuts)"
     return f"unknown desktop ({d or 'none reported'})"
 
 
@@ -205,6 +205,33 @@ def _apply_gnome(bindings, command) -> BindResult:
     return BindResult(True, "registered as GNOME custom keybindings")
 
 
+def _apply_plasma(bindings, command) -> BindResult:
+    # Let KGlobalAccel handle conflict resolution through its native settings UI.
+    root = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
+    root = root / "applications"
+    root.mkdir(parents=True, exist_ok=True)
+    if any(c in command for c in "\n\r"):
+        raise ValueError("invalid shortcut command")
+    escaped = command.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = escaped.replace("`", "\\`").replace("$", "\\$").replace("%", "%%")
+    for action in bindings:
+        if action not in ACTION_ARGS:
+            continue
+        path = root / f"org.voxd.{action}.desktop"
+        path.write_text(
+            "[Desktop Entry]\nType=Application\n"
+            f"Name=voxd — {ACTION_LABEL[action]}\n"
+            f'Exec="{escaped}" {ACTION_ARGS[action]}\n'
+            "Icon=audio-input-microphone\nTerminal=false\nCategories=Utility;\n",
+            encoding="utf-8")
+    updater = shutil.which("kbuildsycoca6") or shutil.which("kbuildsycoca5")
+    if updater:
+        subprocess.run([updater, "--noincremental"], capture_output=True, timeout=15)
+    return BindResult(False, "KDE launchers installed; assign shortcuts in System Settings",
+                      "Keyboard → Shortcuts → Add New → Application: search voxd.\n"
+                      + _manual_text(bindings, command))
+
+
 def _manual_text(bindings, command) -> str:
     rows = [f"  {accel}  →  {command} {ACTION_ARGS[action]}"
             for action, accel in bindings.items() if action in ACTION_ARGS]
@@ -220,6 +247,8 @@ def apply(bindings: dict[str, str], command: str = "voxctl") -> BindResult:
             return _apply_hyprland(bindings, command)
         if "sway" in d:
             return _apply_sway(bindings, command)
+        if "kde" in d or "plasma" in d:
+            return _apply_plasma(bindings, command)
         if "gnome" in d:
             return _apply_gnome(bindings, command)
     except Exception as e:

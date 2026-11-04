@@ -190,15 +190,9 @@ def recommend(machine) -> Recommendation:
 
     llm: Model | None = None
     llm_device = "cpu"
-    if gpu and vram >= 5000 and ram >= 6144:
-        llm, llm_device = BY_ID["qwen3-4b-q5_k_m"], "gpu"
-        bits.append("self-correction runs on the graphics card")
-    elif ram >= 12288 and cores >= 8:
-        llm, llm_device = BY_ID["qwen3-4b-q5_k_m"], "cpu"
-        bits.append("self-correction runs on the processor")
-    elif ram >= 6144 and cores >= 4:
-        llm, llm_device = BY_ID["qwen3-1.7b-q4_k_m"], "cpu"
-        bits.append("a small language model handles self-correction")
+    if ram >= 6144 and cores >= 4:
+        llm = BY_ID["qwen3-1.7b-q4_k_m"]
+        bits.append("a compact 4-bit editor stays loaded on the processor")
     else:
         bits.append("no language model — Parakeet punctuates on its own")
 

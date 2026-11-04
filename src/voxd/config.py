@@ -6,6 +6,8 @@ config never stops the program from starting — it falls back and says so.
 
 from __future__ import annotations
 
+import copy
+import json
 import os
 import sys
 import tempfile
@@ -15,7 +17,7 @@ from pathlib import Path
 try:
     import tomllib
 except ModuleNotFoundError:                     # Python 3.10
-    import tomli as tomllib                     # type: ignore
+    import tomli as tomllib  # type: ignore
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -65,7 +67,7 @@ def model_path(model_id: str) -> Path:
 DEFAULTS: dict = {
     "setup": {
         "completed": False,
-        "version": 1,
+        "version": 2,
     },
     "audio": {
         "device": "",               # empty = system default
@@ -82,10 +84,10 @@ DEFAULTS: dict = {
         # moderate - also removes filler words
         # strong   - also smooths into clean written prose
         "level": "strong",
-        "model": "qwen3-4b-q5_k_m",
-        "device": "gpu",
+        "model": "qwen3-1.7b-q4_k_m",
+        "device": "cpu",
         "port": 8612,
-        "idle_unload_sec": 90,
+        "idle_unload_sec": 0,  # 0 = stay resident until explicitly unloaded
         # Safety net: if the edited text drifts too far in length from what was
         # actually said, the raw transcript is used instead.
         "max_growth": 2.5,
@@ -98,7 +100,7 @@ DEFAULTS: dict = {
     },
     "inject": {
         "focus_delay_ms": 40,
-        "order": ["wtype", "ydotool", "clipboard"],
+        "order": [],             # platform/session-specific default
     },
     "ui": {
         "theme": "system",          # system | dark | light
@@ -108,7 +110,7 @@ DEFAULTS: dict = {
 
 
 def _deep_merge(base: dict, over: dict) -> dict:
-    out = dict(base)
+    out = copy.deepcopy(base)
     for k, v in (over or {}).items():
         out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
     return out
@@ -145,7 +147,15 @@ class Config:
         if not CONFIG_PATH.exists():
             return cfg
         try:
-            cfg.data = _deep_merge(DEFAULTS, tomllib.loads(CONFIG_PATH.read_text("utf-8")))
+            saved = tomllib.loads(CONFIG_PATH.read_text("utf-8"))
+            if saved.get("setup", {}).get("version", 1) < 2:
+                editor = saved.get("edit", {})
+                if editor.get("model") == "qwen3-4b-q5_k_m":
+                    editor.update(model="qwen3-1.7b-q4_k_m", device="cpu")
+                if editor.get("idle_unload_sec") == 90:
+                    editor["idle_unload_sec"] = 0
+                saved.setdefault("setup", {})["version"] = 2
+            cfg.data = _deep_merge(DEFAULTS, saved)
         except Exception as e:
             cfg.problem = f"{CONFIG_PATH} could not be read ({e}); using defaults"
         return cfg
@@ -188,4 +198,4 @@ def _val(v) -> str:
         return str(v)
     if isinstance(v, (list, tuple)):
         return "[" + ", ".join(_val(x) for x in v) + "]"
-    return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return json.dumps(str(v), ensure_ascii=False)

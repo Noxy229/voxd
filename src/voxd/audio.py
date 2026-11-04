@@ -17,6 +17,7 @@ import time
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
+MAX_RECORD_SEC = 600
 BLOCK = 1600            # 100 ms
 
 IS_WINDOWS = sys.platform == "win32"
@@ -117,6 +118,7 @@ class Recorder:
         self.device = device
         self.on_block = on_block          # callback(bytes) per block
         self.pcm = bytearray()
+        self.retain_audio = True
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._proc = None
@@ -169,7 +171,12 @@ class Recorder:
     # -- Backends -----------------------------------------------------
     def _feed(self, chunk: bytes):
         with self._lock:
-            self.pcm.extend(chunk)
+            remaining = MAX_RECORD_SEC * SAMPLE_RATE * 2 - len(self.pcm)
+            if remaining <= 0:
+                self.error = "Recording limit reached (10 minutes); finish dictation"
+                return
+            if self.retain_audio:
+                self.pcm.extend(chunk[:remaining])
         if self.on_block:
             self.on_block(chunk)
 
@@ -213,8 +220,9 @@ class Recorder:
         except Exception as e:
             self.error = str(e)
             return
+        stream = self._proc.stdout
         while not self._stop.is_set():
-            chunk = self._proc.stdout.read(BLOCK * 2)
+            chunk = stream.read(BLOCK * 2)
             if not chunk:
                 break
             self._feed(chunk)
@@ -247,6 +255,7 @@ class LevelMonitor:
 
     def __init__(self, device, on_level):
         self.rec = Recorder(device, on_block=lambda c: on_level(peak(c)))
+        self.rec.retain_audio = False
 
     def start(self):
         self.rec.start()

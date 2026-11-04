@@ -12,7 +12,7 @@ import sys
 import threading
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QIcon, QPainter, QPixmap, QColor
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from . import ipc
@@ -30,6 +30,7 @@ class Bridge(QObject):
     """Carries session events from worker threads onto the Qt thread."""
     state = Signal(str, str, float)
     result = Signal(object)
+    command = Signal(object)
 
 
 class Application:
@@ -49,6 +50,7 @@ class Application:
         self.bridge = Bridge()
         self.bridge.state.connect(self._on_state, Qt.QueuedConnection)
         self.bridge.result.connect(self._on_result, Qt.QueuedConnection)
+        self.bridge.command.connect(self._command, Qt.QueuedConnection)
 
         self.session = Session(self.cfg, Callbacks(
             on_state=lambda s, t, lv: self.bridge.state.emit(s, t, lv),
@@ -56,14 +58,22 @@ class Application:
             on_log=log))
 
         self.tray = self._build_tray()
-        self.server = ipc.Server(self._handlers(), log=log)
+        handlers = {name: (lambda n=name: self._dispatch(n)) for name in self._handlers()}
+        self.server = ipc.Server(handlers, log=log)
         self.server.start()
 
         self.wizard = None
         if not self.cfg.get("setup.completed", False):
             QTimer.singleShot(0, self.open_setup)
         else:
-            self.session.preload()
+            from .download import is_installed
+            needed = [self.cfg.get("asr.model")]
+            if self.cfg.get("edit.enabled"):
+                needed.append(self.cfg.get("edit.model"))
+            if not all(is_installed(mid) for mid in needed):
+                QTimer.singleShot(0, self.open_setup)
+            else:
+                self.session.preload()
 
     # ------------------------------------------------------------- theme
     def _palette(self):
@@ -126,6 +136,14 @@ class Application:
 
     # ------------------------------------------------------ session events
     def _on_state(self, state: str, text: str, level: float):
+        if self.overlay.tray_only:
+            if self.tray:
+                statuses = {"listening": "Listening", "thinking": "Processing",
+                            "done": "Ready", "cancelled": "Discarded", "problem": "Needs attention"}
+                self.tray.setToolTip("voxd — " + statuses.get(state, state))
+                if state == "problem":
+                    self.tray.showMessage("voxd", text)
+            return
         if state == "listening":
             self.overlay.push_level(level)
             if not self.overlay.isVisible() or self.overlay.state != "listening":
@@ -147,6 +165,9 @@ class Application:
 
     # ------------------------------------------------------------ windows
     def open_setup(self):
+        if self.session.recording or self.session.status()["busy"]:
+            self.overlay.show_problem("Finish dictation before opening settings")
+            return
         from .ui.wizard import Wizard
         if self.wizard is not None and self.wizard.isVisible():
             self.wizard.raise_()
@@ -154,25 +175,58 @@ class Application:
             return
         self.wizard = Wizard(self.palette)
         self.wizard.finished.connect(self._setup_finished)
+        self.wizard.closed.connect(lambda: setattr(self.session, "suspended", False))
+        self.session.suspended = True
         self.wizard.show()
 
     def _setup_finished(self, choices: dict):
+        from copy import deepcopy
+        self.cfg = Config(deepcopy(self.cfg.data))
         for key, value in (("asr.model", choices.get("asr")),
                            ("asr.device", choices.get("asr_device")),
                            ("edit.model", choices.get("llm")),
                            ("edit.device", choices.get("llm_device"))):
             if value:
                 self.cfg.set(key, value)
+        device = choices.get("audio_device")
+        self.cfg.set("audio.device", device if device is not None else "")
+        self.cfg.set("edit.idle_unload_sec", 0)
         self.cfg.set("edit.enabled", bool(choices.get("llm")))
         self.cfg.set("setup.completed", True)
         self.cfg.save()
-        self.session.cfg = self.cfg
-        self.session.redactor = self.session._build_redactor()
+        if not self.session.reconfigure(self.cfg):
+            self.overlay.show_problem("Models still loading; restart voxd to apply settings")
         if self.wizard:
             self.wizard.close()
-        self.session.preload()
+        import shutil
+
+        from . import hotkeys
+        command = shutil.which("voxctl") or "voxctl"
+        bindings = {key: self.cfg.get(f"hotkeys.{key}") for key in ("toggle", "raw", "cancel")}
+        result = hotkeys.apply(bindings, command)
+        if not result.ok:
+            log(result.how, result.manual_hint)
+            if self.tray:
+                self.tray.showMessage("Shortcut setup", result.how + "\n" + result.manual_hint)
 
     # ---------------------------------------------------------- lifecycle
+    def _dispatch(self, name):
+        request = {"name": name, "done": threading.Event(), "reply": "error: timed out"}
+        self.bridge.command.emit(request)
+        if not request["done"].wait(10):
+            request["done"].set()
+        return request["reply"]
+
+    def _command(self, request):
+        if request["done"].is_set():
+            return
+        try:
+            request["reply"] = self._handlers()[request["name"]]()
+        except Exception as e:
+            request["reply"] = f"error: {e}"
+        finally:
+            request["done"].set()
+
     def _handlers(self) -> dict:
         return {
             "toggle": lambda: (self.session.toggle(False), "ok")[1],
@@ -181,22 +235,25 @@ class Application:
             "stop": lambda: (self.session.stop(), "ok")[1],
             "cancel": lambda: (self.session.cancel(), "ok")[1],
             "insert-raw": lambda: (self.session.insert_last_raw(), "ok")[1],
-            "release": lambda: (self.session.release(), "ok")[1],
+            "release": lambda: "ok" if self.session.release() else "busy",
             "status": self.session.status,
             "reload": self.reload,
-            "setup": lambda: (QTimer.singleShot(0, self.open_setup), "ok")[1],
+            "setup": lambda: (self.open_setup(), "ok")[1],
             "quit": lambda: (QTimer.singleShot(0, self.quit), "ok")[1],
         }
 
     def reload(self) -> str:
-        self.cfg = Config.load()
-        self.session.cfg = self.cfg
-        self.session.redactor = self.session._build_redactor()
-        return self.cfg.problem or "ok"
+        cfg = Config.load()
+        if cfg.problem:
+            return cfg.problem
+        if not self.session.reconfigure(cfg):
+            return "busy: finish dictation/model loading before reload"
+        self.cfg = cfg
+        return "ok"
 
     def quit(self):
-        self.session.release()
         self.server.stop()
+        self.session.close()
         self.qt.quit()
 
     def run(self) -> int:

@@ -33,13 +33,13 @@ def _run(cmd, **kw) -> subprocess.CompletedProcess:
 
 def focused_app() -> str:
     """Window class of the focused window, used as the cache key."""
-    if shutil.which("hyprctl"):
+    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") and shutil.which("hyprctl"):
         try:
             out = _run(["hyprctl", "activewindow", "-j"], timeout=2).stdout
             return json.loads(out).get("class") or "unknown"
         except Exception:
             pass
-    if shutil.which("swaymsg"):
+    if os.environ.get("SWAYSOCK") and shutil.which("swaymsg"):
         try:
             tree = json.loads(_run(["swaymsg", "-t", "get_tree"], timeout=2).stdout)
 
@@ -56,7 +56,7 @@ def focused_app() -> str:
                 "class") or "unknown"
         except Exception:
             pass
-    if shutil.which("xdotool"):
+    if not WAYLAND and shutil.which("xdotool"):
         try:
             wid = _run(["xdotool", "getactivewindow"], timeout=2).stdout.strip()
             cls = _run(["xdotool", "getwindowclassname", wid], timeout=2).stdout
@@ -92,7 +92,7 @@ def type_ydotool(text: str) -> bool:
 
 
 def get_clipboard() -> bytes:
-    if shutil.which("wl-paste"):
+    if WAYLAND and shutil.which("wl-paste"):
         try:
             return _run(["wl-paste", "-n"], timeout=3).stdout
         except Exception:
@@ -107,7 +107,7 @@ def get_clipboard() -> bytes:
 
 def set_clipboard(text) -> bool:
     payload = text.encode() if isinstance(text, str) else text
-    if shutil.which("wl-copy"):
+    if WAYLAND and shutil.which("wl-copy"):
         return subprocess.run(["wl-copy"], input=payload, timeout=5).returncode == 0
     if shutil.which("xclip"):
         return subprocess.run(["xclip", "-selection", "clipboard"], input=payload,
@@ -117,9 +117,10 @@ def set_clipboard(text) -> bool:
 
 def _press_paste() -> bool:
     if WAYLAND and shutil.which("wtype"):
-        return _run(["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"],
-                    timeout=10).returncode == 0
-    if shutil.which("xdotool"):
+        if _run(["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"],
+                timeout=10).returncode == 0:
+            return True
+    if not WAYLAND and shutil.which("xdotool"):
         return _run(["xdotool", "key", "--clearmodifiers", "ctrl+v"],
                     timeout=10).returncode == 0
     if shutil.which("ydotool"):
@@ -137,17 +138,10 @@ def type_clipboard(text: str) -> bool:
     ok = _press_paste()
     time.sleep(0.15)
 
-    # Keep clipboard managers from filling up with every dictation.
-    if shutil.which("cliphist"):
-        try:
-            _run(["cliphist", "delete-query", text[:60]], timeout=3)
-        except Exception:
-            pass
-
-    if previous:
+    # A failed paste leaves the transcript available for manual Ctrl+V.
+    # Do not delete history entries by text query: they may predate this dictation.
+    if ok and previous:
         set_clipboard(previous)
-    elif shutil.which("wl-copy"):
-        _run(["wl-copy", "--clear"], timeout=5)
     return ok
 
 
@@ -160,6 +154,9 @@ def methods() -> dict:
 
 def default_order() -> list[str]:
     if WAYLAND:
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+        if "kde" in desktop or "plasma" in desktop:
+            return ["clipboard", "ydotool"]
         return ["wtype", "ydotool", "clipboard"]
     return ["xdotool", "ydotool", "clipboard"]
 

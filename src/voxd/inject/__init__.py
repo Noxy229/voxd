@@ -45,7 +45,8 @@ class Injector:
     # -- learned per-application method ---------------------------------
     def _load_cache(self) -> dict:
         try:
-            return json.loads(self.cache_path.read_text("utf-8"))
+            data = json.loads(self.cache_path.read_text("utf-8"))
+            return data if isinstance(data, dict) else {}
         except Exception:
             return {}
 
@@ -71,7 +72,7 @@ class Injector:
 
         app = self._backend.focused_app()
         order = list(self.order)
-        learned = self.cache.get(app)
+        learned = self.cache.get(app) if app != "unknown" else None
         if learned in order:
             order.remove(learned)
             order.insert(0, learned)
@@ -86,7 +87,7 @@ class Injector:
                 continue
             try:
                 if fn(text):
-                    if self.cache.get(app) != name:
+                    if app != "unknown" and self.cache.get(app) != name:
                         self.cache[app] = name
                         self._save_cache()
                     self.log(f"typed via {name} into {app}")

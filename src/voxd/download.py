@@ -18,7 +18,7 @@ from pathlib import Path
 from . import catalog
 from .config import MODEL_DIR
 
-UA = "voxd/0.1 (+https://github.com/Noxy229/voxd)"
+UA = "voxd/0.1"
 CHUNK = 1 << 18
 
 
@@ -56,7 +56,8 @@ def is_installed(model_id: str) -> bool:
     if model is None:
         return False
     d = model_dir(model_id)
-    return all((d / f.name).exists() for f in model.files)
+    return all((d / f.name).is_file() and (d / f.name).stat().st_size > 0
+               for f in model.files)
 
 
 def installed_bytes(model_id: str) -> int:
@@ -67,6 +68,8 @@ def installed_bytes(model_id: str) -> int:
 
 
 def remove(model_id: str) -> bool:
+    if catalog.get(model_id) is None:
+        return False
     d = model_dir(model_id)
     if d.exists():
         shutil.rmtree(d, ignore_errors=True)
@@ -112,6 +115,8 @@ def _fetch(url: str, dest: Path, on_chunk=None) -> None:
                 if on_chunk:
                     elapsed = max(1e-6, time.time() - started)
                     on_chunk(have, total, (have - last) / elapsed)
+    if have == 0 or (length and have != total):
+        raise DownloadError("incomplete download; retry to resume")
     os.replace(part, dest)
 
 
@@ -125,7 +130,7 @@ def fetch_model(model_id: str, on_progress=None) -> Path:
 
     for i, f in enumerate(model.files, start=1):
         dest = d / f.name
-        if dest.exists():
+        if dest.is_file() and dest.stat().st_size > 0:
             continue
 
         def report(done, total, rate, _f=f, _i=i):

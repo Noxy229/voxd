@@ -7,12 +7,22 @@ that would be decoration without information.
 
 from __future__ import annotations
 
+import threading
+
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QPushButton, QScrollArea,
-                               QStackedWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .. import catalog, hardware
-from .theme import DARK, Palette, S2, S3, S4, S5, S6, stylesheet
+from .theme import DARK, S2, S3, S4, S5, S6, Palette, stylesheet
 from .widgets import Badge, Card, KeyValue, LevelMeter, label, rule, spacer
 
 PKG_HINTS = {
@@ -26,15 +36,15 @@ PKG_HINTS = {
 # Package names differ between distributions.
 PKG_NAMES = {
     "pacman": {"wtype": "wtype", "ydotool": "ydotool", "wl-copy": "wl-clipboard",
-               "xdotool": "xdotool", "portaudio": "portaudio"},
+               "xclip": "xclip", "xdotool": "xdotool", "portaudio": "portaudio"},
     "apt": {"wtype": "wtype", "ydotool": "ydotool", "wl-copy": "wl-clipboard",
-            "xdotool": "xdotool", "portaudio": "libportaudio2"},
+            "xclip": "xclip", "xdotool": "xdotool", "portaudio": "libportaudio2"},
     "dnf": {"wtype": "wtype", "ydotool": "ydotool", "wl-copy": "wl-clipboard",
-            "xdotool": "xdotool", "portaudio": "portaudio"},
+            "xclip": "xclip", "xdotool": "xdotool", "portaudio": "portaudio"},
     "zypper": {"wtype": "wtype", "ydotool": "ydotool", "wl-copy": "wl-clipboard",
-               "xdotool": "xdotool", "portaudio": "portaudio"},
+               "xclip": "xclip", "xdotool": "xdotool", "portaudio": "portaudio"},
     "apk": {"wtype": "wtype", "ydotool": "ydotool", "wl-copy": "wl-clipboard",
-            "xdotool": "xdotool", "portaudio": "portaudio"},
+            "xclip": "xclip", "xdotool": "xdotool", "portaudio": "portaudio"},
 }
 
 
@@ -227,10 +237,17 @@ class DepsStep(Step):
         mgr = sysinfo.get("package_manager")
         wayland = sysinfo.get("session") == "wayland"
 
-        needed = [("wl-copy", "Clipboard", True)]
+        if sysinfo.get("os") == "windows":
+            self.body.addWidget(label("Windows input uses the built-in SendInput API.",
+                                      "caption", wrap=True))
+            return
+        plasma = any(d in (sysinfo.get("desktop") or "").lower()
+                     for d in ("kde", "plasma"))
+        needed = [("wl-copy" if wayland else "xclip", "Clipboard", True)]
         if wayland:
-            needed += [("wtype", "Typing (Wayland)", True),
-                       ("ydotool", "Fallback", False)]
+            needed += ([("ydotool", "Paste keys (requires ydotoold)", True)] if plasma
+                       else [("wtype", "Typing (Wayland)", True),
+                             ("ydotool", "Fallback", False)])
         else:
             needed += [("xdotool", "Typing (X11)", True)]
 
@@ -275,9 +292,11 @@ class MicStep(Step):
 
     def build(self):
         self.combo = QComboBox()
+        self.combo.addItem("System default", None)
         self.devices = self.wiz.list_inputs()
         for d in self.devices:
             self.combo.addItem(d["label"], d["id"])
+        self.combo.currentIndexChanged.connect(self._switch)
         self.body.addWidget(self.combo)
 
         c = Card()
@@ -297,7 +316,6 @@ class MicStep(Step):
 
     def on_enter(self):
         self.wiz.start_monitor(self.combo.currentData(), self.meter)
-        self.combo.currentIndexChanged.connect(self._switch)
 
     def on_leave(self):
         self.wiz.stop_monitor()
@@ -339,7 +357,13 @@ class HotkeyStep(Step):
             note = (f"Written into your {desktop.title()} configuration as a key "
                     "binding. On Wayland that is the only reliable route — the "
                     "protocol does not let an application grab global keys.")
-        elif "gnome" in desktop or "kde" in desktop or "plasma" in desktop:
+        elif "kde" in desktop or "plasma" in desktop:
+            note = ("Setup installs three voxd launchers. Assign them under System "
+                    "Settings → Keyboard → Shortcuts → Add New → Application. "
+                    "On Plasma Wayland, install wl-clipboard and configure ydotoold "
+                    "for automatic paste. Without it, paste the result with Ctrl+V. "
+                    "KWin controls overlay placement; bottom placement is not guaranteed.")
+        elif "gnome" in desktop:
             note = ("Added as a custom shortcut in your system settings. If that "
                     "does not take, you can bind it there yourself to the "
                     "command: voxctl toggle")
@@ -365,8 +389,12 @@ class DownloadStep(Step):
         self.body.addWidget(self.status)
 
     def on_enter(self):
-        rec = self.wiz.rec
-        models = [m for m in (rec.asr, rec.llm) if m]
+        while self.rows.box.count():
+            item = self.rows.box.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        choices = self.wiz.result()
+        models = [catalog.get(mid) for mid in (choices["asr"], choices["llm"]) if mid]
         total = sum(m.size_mb for m in models)
         for m in models:
             self.rows.add(m.title, f"{m.size_mb / 1024:.1f} GB")
@@ -382,6 +410,11 @@ STEPS = [WelcomeStep, HardwareStep, RecommendStep, DepsStep, MicStep,
 
 class Wizard(QWidget):
     finished = Signal(dict)
+    closed = Signal()
+    level_changed = Signal(float)
+    mic_finished = Signal(bool, str)
+    download_progress = Signal(object)
+    download_finished = Signal(str)
 
     def __init__(self, palette: Palette = DARK, machine=None):
         super().__init__()
@@ -392,6 +425,7 @@ class Wizard(QWidget):
         self.hotkey_label = ("Win + H" if self.machine.system.get("os") == "windows"
                              else "Super + H")
         self._monitor = None
+        self._downloading = False
 
         self.setObjectName("root")
         self.setWindowTitle("Set up voxd")
@@ -433,6 +467,10 @@ class Wizard(QWidget):
         fb.addWidget(self.next_btn)
         root.addWidget(foot)
 
+        self.level_changed.connect(self._push_level, Qt.QueuedConnection)
+        self.mic_finished.connect(self._mic_done, Qt.QueuedConnection)
+        self.download_progress.connect(self._download_progress, Qt.QueuedConnection)
+        self.download_finished.connect(self._download_done, Qt.QueuedConnection)
         self._sync()
 
     # -- Navigation ------------------------------------------------------
@@ -449,7 +487,7 @@ class Wizard(QWidget):
             return
         cur.on_leave()
         if self.stack.currentIndex() == len(STEPS) - 1:
-            self.finished.emit(self.result())
+            self._download()
             return
         self.stack.setCurrentIndex(self.stack.currentIndex() + 1)
         self._sync()
@@ -462,10 +500,11 @@ class Wizard(QWidget):
     def result(self) -> dict:
         asr = self.rec.asr if self.choice == "recommended" else catalog.get(self.choice)
         return {"asr": asr.id if asr else None,
-                "asr_device": self.rec.asr_device,
+                "asr_device": self.rec.asr_device if self.choice == "recommended" else "gpu",
                 "llm": self.rec.llm.id if self.rec.llm else None,
                 "llm_device": self.rec.llm_device,
-                "hotkey": self.hotkey_label}
+                "hotkey": self.hotkey_label,
+                "audio_device": self.stack.widget(4).combo.currentData()}
 
     # -- Hooks the application provides ----------------------------------
     def list_inputs(self) -> list[dict]:
@@ -475,7 +514,7 @@ class Wizard(QWidget):
     def start_monitor(self, device_id, meter):
         self.stop_monitor()
         from ..audio import LevelMonitor
-        self._monitor = LevelMonitor(device_id, meter.push)
+        self._monitor = LevelMonitor(device_id, self.level_changed.emit)
         self._monitor.start()
 
     def stop_monitor(self):
@@ -485,4 +524,59 @@ class Wizard(QWidget):
 
     def run_mic_test(self, device_id, callback):
         from ..audio import quick_test
-        quick_test(device_id, callback)
+        self.stop_monitor()
+        self._mic_callback = callback
+        quick_test(device_id, self.mic_finished.emit)
+
+    def _mic_done(self, ok, message):
+        self._mic_callback(ok, message)
+        if self.stack.currentIndex() == 4:
+            step = self.stack.widget(4)
+            self.start_monitor(step.combo.currentData(), step.meter)
+
+    def _push_level(self, value):
+        if self._monitor and self.stack.currentIndex() == 4:
+            self.stack.widget(4).meter.push(value)
+
+    def _download(self):
+        if self._downloading:
+            return
+        from ..download import fetch_all
+        self._downloading = True
+        self.next_btn.setEnabled(False)
+        self.back_btn.setEnabled(False)
+        step = self.stack.currentWidget()
+        self._progress_bar = QProgressBar()
+        step.body.addWidget(self._progress_bar)
+        choices = self.result()
+        def run():
+            try:
+                fetch_all([choices["asr"], choices["llm"]], self.download_progress.emit)
+            except Exception as e:
+                self.download_finished.emit(str(e))
+            else:
+                self.download_finished.emit("")
+        threading.Thread(target=run, daemon=True).start()
+
+    def _download_progress(self, progress):
+        self._progress_bar.setValue(int(100 * progress.fraction))
+        self.stack.currentWidget().status.setText(
+            f"{progress.file_name} — {progress.done_bytes // (1024 * 1024)} MB")
+
+    def _download_done(self, error):
+        self._downloading = False
+        self.next_btn.setEnabled(True)
+        self.back_btn.setEnabled(True)
+        self._progress_bar.deleteLater()
+        if error:
+            self.stack.currentWidget().status.setText(f"Download failed: {error}. Retry Finish.")
+        else:
+            self.finished.emit(self.result())
+
+    def closeEvent(self, event):
+        if self._downloading:
+            event.ignore()
+            return
+        self.stop_monitor()
+        self.closed.emit()
+        super().closeEvent(event)

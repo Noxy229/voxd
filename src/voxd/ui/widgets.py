@@ -7,15 +7,15 @@ that is how a design system falls apart.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QSizePolicy,
-                               QVBoxLayout, QWidget)
+from PySide6.QtGui import QColor, QPainter
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
-from .theme import RADIUS, S1, S2, S3, S4, Palette
+from .theme import S1, S2, S3, S4, Palette
 
 
 def label(text: str, role: str = "", wrap: bool = False) -> QLabel:
     lb = QLabel(text)
+    lb.setTextFormat(Qt.PlainText)
     if role:
         lb.setProperty("role", role)
     lb.setWordWrap(wrap)

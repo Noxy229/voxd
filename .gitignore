@@ -10,3 +10,16 @@ build/
 *.bin
 .venv/
 docs/images/*.part
+
+# Local configuration, recordings and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.wav
+*.flac
+*.log
+.pytest_cache/
+.ruff_cache/
+config.local.toml

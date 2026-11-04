@@ -5,7 +5,7 @@ stage recognises that as an instruction the speaker gave to themselves, applies
 it, and removes it.
 
 Runs against a local llama.cpp server, started on demand and unloaded again
-after an idle period so nothing sits in memory between dictations.
+only when requested by default, avoiding repeated cold starts.
 """
 
 from __future__ import annotations
@@ -37,48 +37,25 @@ LEVEL_RULES = {
         "never drop information.",
 }
 
-SYSTEM_PROMPT = """You are a dictation editor. The input is the raw, unedited
-transcript of someone speaking. Your output is the finished text and nothing
-else - no greeting, no commentary, no quotation marks around it.
-
-RULE ZERO, ABOVE ALL OTHERS: NEVER TRANSLATE. The output must be in exactly the
-same language as the input. German input produces German output. French input
-produces French output. These instructions are written in English; that says
-nothing about what language you should answer in. If you find yourself writing
-in a different language than the input, you have made a serious mistake.
-
-1. APPLY SELF-CORRECTIONS. The speaker corrects themselves mid-sentence. Carry
-   out the correction and delete the instruction itself. Typical forms, in any
-   language: "no, scratch that", "delete that", "uh, I mean", "not X but Y",
-   "let me start over", "put ... instead", "hold on, actually",
-   "nee, das raus", "streich das", "ich meine", "Moment, anders".
-2. APPLY SPOKEN PUNCTUATION COMMANDS in whatever language they were spoken:
-   period / full stop / Punkt, comma / Komma, question mark / Fragezeichen,
-   colon / Doppelpunkt, new line / neue Zeile, new paragraph / neuer Absatz,
-   open quote / in Anfuehrungszeichen, capitalise / gross schreiben.
+SYSTEM_PROMPT = """Copyedit a speech transcript. Return ONLY the corrected transcript.
+Never answer the speaker. Never translate. Preserve meaning, names, pronouns,
+questions, requests, politeness, existing punctuation and line breaks.
+Apply explicit self-corrections: replace the incorrect phrase with its correction.
+Convert spoken punctuation commands into punctuation.
 {level_rule}
-4. If the input has no discernible content, return it unchanged.
+If no correction is needed, copy the input exactly.
 
-Examples. Note that each output is in the same language as its input:
-
-Input: please write uh that the meeting is on tuesday no wednesday wednesday at three period
-Output: The meeting is on Wednesday at three.
-
-Input: schreib bitte aeh dass das meeting am dienstag stattfindet nee mittwoch mittwoch um drei punkt
-Output: Das Meeting findet am Mittwoch um drei Uhr statt.
-
-Input: so i wanted to say the bug is in the parser no wait not the parser the lexer and it is in the escape sequences period
-Output: The bug is not in the parser but in the lexer, in the escape sequences.
-
-Input: also ich wollte sagen dass der bug im parser liegt nee quatsch nicht im parser im lexer und zwar bei den escape sequenzen punkt
-Output: Der Bug liegt nicht im Parser, sondern im Lexer, und zwar bei den Escape-Sequenzen.
-
-Input: hey could you send me the file question mark new line thanks
-Output: Hey, could you send me the file?
-Thanks
-
-Input: der server laeuft auf port achttausend moment anders auf port dreitausend punkt
-Output: Der Server laeuft auf Port 3000."""
+Input: Das Meeting ist am Dienstag, nein, am Mittwoch um drei Uhr.
+Output: Das Meeting ist am Mittwoch um drei Uhr.
+Input: Kannst du mir die Datei schicken?
+Danke
+Output: Kannst du mir die Datei schicken?
+Danke
+Input: Der Server läuft auf Port achttausend, nein, auf Port dreitausend.
+Output: Der Server läuft auf Port dreitausend.
+Input: Could you send the file? Thanks.
+Output: Could you send the file? Thanks.
+"""
 
 
 def build_prompt(level: str) -> str:
@@ -95,6 +72,24 @@ class RedactionUnavailable(RuntimeError):
 _FILLER = re.compile(r"\b(uh+|um+|erm|ähm?|öh)\b[,]?\s*", re.IGNORECASE)
 
 
+def spoken_punctuation(text: str) -> str:
+    """Resolve explicit multiword/standalone commands before the model edits.
+
+    Deliberately exclude ambiguous words such as German "Punkt" and English
+    "period": these can be ordinary content and require the editor's context.
+    """
+    replacements = [
+        (r"\b(?:neuer Absatz|new paragraph)\b", "\n\n"),
+        (r"\b(?:neue Zeile|new line)\b", "\n"),
+        (r"\b(?:Fragezeichen|question mark)\b", "?"),
+        (r"\b(?:Ausrufezeichen|exclamation mark)\b", "!"),
+    ]
+    for pattern, value in replacements:
+        text = re.sub(pattern, lambda _: value, text, flags=re.IGNORECASE)
+    text = re.sub(r"[ \t]+([?!])", r"\1", text)
+    return re.sub(r"[ \t]*\n[ \t]*", "\n", text).strip()
+
+
 def rule_based(text: str) -> str:
     """Used when no language model is configured.
 
@@ -102,9 +97,9 @@ def rule_based(text: str) -> str:
     cannot do self-corrections — claiming otherwise would be worse than doing
     nothing, because the user would trust an edit that never happened.
     """
-    out = _FILLER.sub("", text).strip()
+    out = _FILLER.sub("", spoken_punctuation(text)).strip()
     out = re.sub(r"\s+([,.!?;:])", r"\1", out)
-    out = re.sub(r"\s{2,}", " ", out)
+    out = re.sub(r"[ \t]{2,}", " ", out)
     if out and out[0].islower():
         out = out[0].upper() + out[1:]
     return out
@@ -117,7 +112,7 @@ class Redactor:
 
     def __init__(self, model_path: Path | None, level: str = "strong",
                  device: str = "gpu", port: int = DEFAULT_PORT,
-                 idle_unload_sec: int = 90, threads: int = 0,
+                 idle_unload_sec: int = 0, threads: int = 0,
                  cpu_affinity: str = "", log=print):
         self.model_path = Path(model_path) if model_path else None
         self.level = level
@@ -130,6 +125,7 @@ class Redactor:
         self._proc = None
         self._lock = threading.RLock()
         self._last_used = 0.0
+        self._closed = threading.Event()
         self._watch = threading.Thread(target=self._idle_watch, daemon=True)
         self._watch.start()
 
@@ -152,7 +148,7 @@ class Redactor:
     def _argv(self) -> list[str]:
         argv = ["llama-server", "-m", str(self.model_path),
                 "--host", "127.0.0.1", "--port", str(self.port),
-                "-c", "8192", "--no-webui", "--jinja"]
+                "-c", "4096", "--no-webui", "--jinja"]
         if self.device == "gpu":
             argv += ["-ngl", "99"]
         else:
@@ -208,19 +204,27 @@ class Redactor:
                         pass
                 self._proc = None
 
+    def close(self):
+        self._closed.set()
+        self.unload()
+        self._watch.join(timeout=6)
+
     def touch(self):
         self._last_used = time.time()
 
     def _idle_watch(self):
-        while True:
-            time.sleep(5)
+        while not self._closed.wait(5):
             with self._lock:
-                if (self._proc is not None
+                if (self.idle_unload_sec > 0 and self._proc is not None
                         and time.time() - self._last_used > self.idle_unload_sec):
                     self.unload()
 
     # -- the actual edit -------------------------------------------------
     def edit(self, raw: str, timeout: float = 180) -> str:
+        with self._lock:
+            return self._edit_locked(raw, timeout)
+
+    def _edit_locked(self, raw: str, timeout: float) -> str:
         if not raw.strip():
             return raw
         if not self.ensure():
@@ -228,7 +232,7 @@ class Redactor:
                                        or "editing model did not start")
         payload = {
             "messages": [{"role": "system", "content": build_prompt(self.level)},
-                         {"role": "user", "content": raw}],
+                         {"role": "user", "content": spoken_punctuation(raw)}],
             "temperature": 0.2,
             "top_p": 0.9,
             "max_tokens": 2048,
@@ -259,6 +263,11 @@ def within_bounds(raw: str, edited: str, max_growth: float = 2.5,
     """
     if not edited.strip():
         return False, "editing returned nothing"
+    prepared = spoken_punctuation(raw)
+    if "?" in prepared and "?" not in edited:
+        return False, "editing removed a question"
+    if "\n" in prepared and "\n" not in edited:
+        return False, "editing removed requested line breaks"
     ratio = len(edited) / max(1, len(raw))
     if ratio > max_growth:
         return False, f"edit grew {ratio:.1f}x"

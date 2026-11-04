@@ -226,8 +226,8 @@ QToolTip {{
 def detect_palette() -> Palette:
     """Follow the system light/dark preference instead of forcing one."""
     try:
-        from PySide6.QtGui import QGuiApplication
         from PySide6.QtCore import Qt
+        from PySide6.QtGui import QGuiApplication
         hints = QGuiApplication.styleHints()
         scheme = getattr(hints, "colorScheme", None)
         if scheme and scheme() == Qt.ColorScheme.Light:
