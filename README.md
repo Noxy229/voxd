@@ -4,58 +4,82 @@ Offline dictation for Linux and Windows, with lightweight spelling correction.
 Speech recognition weights are downloaded during installation. Dictation and
 correction run locally afterwards.
 
-## Install
+## Terminal installer
+
+The default installer is a keyboard-first full-screen terminal dashboard for
+Linux and Windows. It shows CPU/RAM/GPU detection, model selection, dictionary
+language and autostart choices alongside the current stage and live subprocess
+output. Tab/Shift+Tab changes focus, arrow keys and Enter select options, Space
+toggles checkboxes, S starts, R retries after a failure, and Q asks to cancel.
+On narrow terminals the panels stack and scroll; status and action buttons stay
+visible. Hardware detection and downloads do not block the UI.
+
+### Linux / curl
+
+After these changes are pushed to a publicly readable repository, the entry is:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Noxy229/voxd/main/install.sh | bash
+```
+
+**Not live yet:** this URL returned HTTP 404 during local verification. Nothing
+has been pushed or made public. The pipeline entry and its payload forwarding
+are tested locally; a private/unpublished repository cannot serve anonymous curl.
+To use the current code immediately, run `./install.sh` from the checkout or
+execute the built `dist/linux/voxd-linux.run`.
+
+The curl script downloads the complete source archive and reconnects input to
+`/dev/tty` so piped installation still supports keyboard interaction. Only the
+small Python/Textual frontend is prepared before the dashboard opens. Remaining
+system packages, the application and speech weights install after pressing S.
+Python/venv itself may require a preliminary package-manager step if absent.
+
+The dashboard lets you skip distribution packages when they already exist.
+Supported package managers: apt, pacman, dnf and zypper. Sudo authentication takes
+place on the real terminal; the password does not enter the log stream. System
+package installation is allowed to finish before cancellation. ydotoold/uinput
+permissions still depend on your distribution and are not granted automatically.
+
+For automation, explicitly bypass the UI:
+
+```bash
+./install.sh --non-interactive --compact --no-system-deps
+```
+
+`--compact`, `--english` and `--autostart` also preselect the interactive choices.
+The app environment is under `$XDG_DATA_HOME/voxd/app`, normally
+`~/.local/share/voxd/app`. Start from the app menu or `~/.local/bin/voxd`.
+Uninstall using `~/.local/share/voxd/app/uninstall.sh` (adjust for XDG_DATA_HOME).
+Models/settings survive uninstall.
 
 ### Windows 10/11 x64
 
-Run **voxd-bootstrap-0.1.0-x64.exe**. The setup wizard installs Python 3.12 per user
-if needed, an isolated application environment, Python/native-wheel dependencies,
-Start menu shortcuts and the selected speech weights. It offers an optional
-login startup entry. No system-wide Python PATH changes or administrator account
-are required. Internet is needed during installation. Python installation uses
-winget or an Authenticode-verified installer from python.org when winget is absent.
+Run **voxd-terminal-setup-x64.exe**, or extract **voxd-terminal-installer.zip**
+and double-click **Install.cmd**. Both open the terminal installer; there are no
+Inno wizard pages in this path. Python 3.12 and the small Textual frontend are
+prepared per-user first if needed. All application packages, model downloads,
+Start-menu entries and optional autostart then run through the dashboard.
+No system-wide Python PATH changes or administrator account are required.
+Python is obtained through winget, with an Authenticode-verified python.org
+installer as fallback. Internet is required during installation.
 
-From a source checkout or extracted source archive, the same installation is:
+From source:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
-# Force recognition weights below 1 GB:
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Compact
+# Automation without terminal interaction:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -NonInteractive -Compact
 ```
 
-Installation lives under `%LOCALAPPDATA%\Programs\voxd`. Start **voxd** from the
-Start menu; **Uninstall voxd** removes the application but retains models and
-settings. With the EXE bootstrap, Windows Installed Apps also lists voxd.
-A detailed bootstrap log is written to `%TEMP%\voxd-install.log`.
-Microphone access must be enabled in Windows Privacy settings.
+Application files live in `%LOCALAPPDATA%\Programs\voxd`. Start from the Start
+menu; **Uninstall voxd** retains models/settings. Installer output is logged to
+`%TEMP%\voxd-install.log`; the alternate-screen UI is excluded from transcripts.
+Enable microphone access for desktop apps in Windows Privacy settings.
+The console EXE is unsigned. It was cross-compiled and its version entry tested
+under Wine; real Windows installation and input injection remain to be tested.
+The older Inno definitions are legacy build sources, not the current UI.
 
-The separate fully bundled installer (`voxd-setup-…-x64.exe`) can be built on
-Windows and needs no preinstalled Python. See [installer builds](docs/INSTALLERS.md).
-The bootstrap EXE is compiled and available locally; actual installation on a
-real Windows machine remains to be tested.
-
-### Linux
-
-Run the self-extracting **voxd-linux.run**, or from the source folder:
-
-```bash
-./install.sh
-# Optional: keep speech weights below 1 GB, start at login:
-./install.sh --compact --autostart
-```
-
-The installer installs system dependencies through apt, pacman, dnf or zypper
-(using sudo for those packages), creates a private environment, downloads speech
-weights and adds application/menu launchers. Run it as your desktop user.
-`--no-system-deps` skips distribution package installation; Python 3.10+, venv,
-PortAudio and the Qt/input libraries must then already exist. `--english` selects
-an English correction dictionary; the default is German.
-
-The application environment is under `$XDG_DATA_HOME/voxd/app` (normally
-`~/.local/share/voxd/app`). Launch via the app menu or `~/.local/bin/voxd`.
-Uninstall with `~/.local/share/voxd/app/uninstall.sh` (adjust for XDG_DATA_HOME).
-Models and configuration survive uninstall. The installer does not install GPU
-drivers or modify kernel input permissions.
+See [installer builds and verification](docs/INSTALLERS.md).
 
 ## Correction without an LLM
 

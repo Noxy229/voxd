@@ -23,9 +23,9 @@ def main():
     payload = io.BytesIO()
     with tarfile.open(fileobj=payload, mode='w:gz') as archive:
         for path in [wheel, ROOT / 'install.sh', ROOT / 'uninstall.sh',
-                     ROOT / 'LICENSE', ROOT / 'README.md']:
+                     ROOT / 'LICENSE', ROOT / 'README.md', ROOT / 'installer/launch_tui.py']:
             data = path.read_bytes()
-            info = tarfile.TarInfo(path.name)
+            info = tarfile.TarInfo('installer/launch_tui.py' if path.name == 'launch_tui.py' else path.name)
             info.size = len(data)
             info.mode = 0o644
             archive.addfile(info, io.BytesIO(data))

@@ -1,4 +1,4 @@
-name: Windows installer
+name: Windows terminal installer
 on:
   workflow_dispatch:
   push:
@@ -14,14 +14,19 @@ jobs:
         with:
           python-version: '3.12'
           architecture: x64
-      - run: choco install innosetup --yes --no-progress
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc
       - shell: pwsh
         run: ./packaging/windows/build.ps1
       - shell: pwsh
         run: |
-          $process = Start-Process dist/windows/voxd/voxd.exe -ArgumentList '--version' -Wait -PassThru
-          if ($process.ExitCode -ne 0) { throw 'Frozen executable smoke failed' }
+          & dist/windows/voxd-terminal-setup-x64.exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'Terminal launcher smoke failed' }
       - uses: actions/upload-artifact@v4
         with:
-          name: voxd-windows-x64
-          path: dist/windows/*-x64.exe
+          name: voxd-windows-terminal
+          path: |
+            dist/windows/voxd-terminal-setup-x64.exe
+            dist/windows/voxd-terminal-installer.zip

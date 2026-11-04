@@ -1,66 +1,74 @@
-# Installer builds and acceptance
+# Terminal installer
 
-## Available installation paths
+The current UI is `src/voxd/installer_tui.py`, using Textual. It launches the
+existing platform installer as a subprocess only after explicit start. The
+platform scripts report actual stages and model download fractions via
+`VOXD_EVENT` JSON lines. Other output goes to a bounded, plain-text live log.
+Installer options are structured argv, never interpolated shell commands.
 
-- `install.ps1`: Windows per-user Python bootstrap, also embedded in the compiled
-  `voxd-bootstrap-0.1.0-x64.exe` installer. Models are downloaded after detection.
-- `install.sh`: Linux system dependencies, isolated application, models and
-  launchers. `tools/build_linux_installer.py` wraps a built wheel and the shell
-  scripts into a self-extracting `.run` without private source paths or Git data.
-- `packaging/windows/voxd.iss`: fully bundled Windows application from PyInstaller.
-  This build route runs on Windows and does not require Python on the target.
+## Build
 
-## Build on Windows
-
-Python 3.12 x64 and Inno Setup 6 or 7 are build tools, not bundled-app target
-prerequisites. Install Inno Setup and place ISCC.exe on PATH, then:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\build.ps1
-# To build only the small bootstrap EXE:
-powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\build.ps1 -BootstrapOnly
+```bash
+.venv/bin/pip install -e '.[dev]' build
+.venv/bin/python -m build
+.venv/bin/python tools/build_linux_installer.py
+# Cross-compile Windows console EXE and make the portable ZIP (MinGW-w64 required):
+.venv/bin/python tools/build_terminal_installer.py
 ```
 
-Outputs are in `dist/windows`. The manually triggered `Windows installer` GitHub
-Actions workflow builds both installer variants and uploads EXEs as artifacts;
-it does not publish a release or change repository visibility.
+On Windows, install Python 3.12 x64 plus MinGW-w64 gcc/windres, then run
+`powershell -NoProfile -ExecutionPolicy Bypass -File packaging/windows/build.ps1`.
+The manually triggered Windows workflow does the same and uploads artifacts.
+It does not publish a release or change repository visibility.
 
-The bootstrap can also be compiled using ISCC under Wine after building the
-wheel: `ISCC packaging/windows/bootstrap.iss`. It was compiled this way locally
-with the official Inno Setup 7.1.1 compiler (download SHA256 verified against the
-publisher's GitHub release asset metadata). The PE is unsigned, so Windows may
-show SmartScreen's unknown-publisher prompt. No signing identity is configured.
+Current outputs:
 
-## What is checked locally
+- `dist/linux/voxd-linux.run`: executable self-extractor opening the TUI.
+- `dist/windows/voxd-terminal-setup-x64.exe`: native x64 console launcher with an
+  embedded wheel/PowerShell payload. It extracts to a unique temporary directory,
+  prepares Python/Textual and opens the same terminal dashboard. No Inno UI.
+- `dist/windows/voxd-terminal-installer.zip`: extract and run `Install.cmd`.
 
-29 automated tests cover spelling with the actual German dictionary, protected
-text, hardware profiles, compact override, transactional config writes, failed
-model downloads and the existing application/Qt lifecycle tests. Ruff, Python
-package builds and shell syntax checks pass. The PowerShell parser validates
-all three installer/build scripts; this does not exercise Windows APIs.
-Both Inno installer definitions compile (the bundled definition is syntax-tested
-with a placeholder payload, not a runnable bundled Windows application).
-The Linux self-extractor's `--help` path is run without installing packages.
+Before first dashboard startup, minimal Python/venv/Textual bootstrapping is
+shown as normal terminal output; the app is not yet installed. Actual system
+packages and application/model installation require the Start action. Neither
+installer supplies GPU drivers or modifies repository visibility.
 
-One local dictionary run loaded in 0.17 s and corrected a synthetic German test
-sentence in 0.8 ms after loading. These are single-run observations; dictionary
-file size was 1,075,650 bytes compressed. No new LLM is required or downloaded.
+## Curl entry
 
-## Windows test after switching machines
+`curl -fsSL https://raw.githubusercontent.com/Noxy229/voxd/main/install.sh | bash`
+is implemented but **not yet publicly available**: the endpoint returned 404
+when checked. Push to a readable repository before advertising this command as
+live. The source archive and raw script use the same `main` branch. A locally
+saved script without a sibling source tree/wheel also fetches the payload.
+Interactive input is reopened from `/dev/tty`; noninteractive sessions require
+`--non-interactive`. Tests stub the network download and exercise the real pipe
+entry, archive extraction and forwarding of arguments without OS installation.
 
-Run the bootstrap EXE, choose Compact if the total speech download should stay
-below 1 GB, and inspect `%TEMP%\voxd-install.log` if setup fails. Verify Python
-installation on a machine without Python, application launch from Start menu,
-German microphone input, Meta+H registration/conflicts, insertion with umlauts
-into Notepad and a browser, warm activation, optional login startup, a retry after
-an interrupted download, and uninstall. Models/settings should remain after
-uninstall. The bootstrap requires internet access and a usable Python package
-index. If winget is missing, the official signed Python installer is verified
-before execution.
+## Failure and cancellation
 
-Actual Windows installation, DLL loading, microphone and SendInput behavior are
-not verified on this Linux machine. The optional PyInstaller bundle must still
-be built and exercised on Windows. On Linux, package-manager commands and input
-service permissions have not been applied to the current machine by these tests.
-Full-precision recognition has not been downloaded or benchmarked locally;
-INT8 remains the verified low-resource path. Neither preset uses GPU acceleration.
+An exit code from the child backend controls success. Errors retain the log and
+unlock choices for retry. A failed download does not mark model setup complete;
+partial model files remain resumable. Q/Ctrl+C requests confirmation while
+running. Cancellation reaps the user-owned backend process tree. During Linux
+system-package installation the UI waits for the package manager to finish
+before allowing cancellation; already installed packages are never rolled back.
+There is no promise of an atomic rollback across OS packages, Python environment,
+models and launchers. Windows uninstallation preserves model/settings directories.
+
+## Verification boundaries
+
+Headless Pilot tests exercise keyboard selection, actual subprocess progress and
+failure/retry, live output while a cancellation dialog is open, cancellation and
+small-terminal navigation. Existing application/model tests remain included.
+The console launcher builds with `-Wall -Wextra -Werror` and its `--version` entry
+is executed under Wine. PowerShell parsing, Bash syntax, package builds and the
+Linux self-extractor's help path are checked. Screenshots are exported from the
+actual Textual widgets with explicitly labelled example hardware/progress.
+
+Real Windows Python/winget/DLL/microphone/SendInput behavior still needs a Windows
+acceptance test. Root-owned package manager and sudo caching behavior must be
+checked on target Linux distributions; no system-package installation is run
+on the development desktop. The curl endpoint is not remotely end-to-end tested
+because it is not published. The previous historical-author-email finding still
+applies before publishing existing Git history.

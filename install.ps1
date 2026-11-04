@@ -1,6 +1,6 @@
 # Windows 10/11 x64, per-user installation. No developer tools required.
 [CmdletBinding()]
-param([switch]$Compact, [switch]$English, [switch]$Autostart,
+param([switch]$NonInteractive, [switch]$Compact, [switch]$English, [switch]$Autostart,
       [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\voxd'))
 $ErrorActionPreference = 'Stop'
 if (-not $env:LOCALAPPDATA) { throw 'Windows desktop session required.' }
@@ -46,6 +46,27 @@ if (-not $Python) {
     $Python = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\python.exe'
     if (-not (Test-Path -LiteralPath $Python)) { throw 'Python not found after winget; restart PowerShell and retry.' }
 }
+if (-not $NonInteractive) {
+    $BootstrapDir = Join-Path $env:LOCALAPPDATA 'voxd\installer-venv'
+    Write-Host 'voxd: preparing terminal UI (Python + Textual) ...'
+    Run-Checked $Python @('-m','venv',$BootstrapDir)
+    $UiPython = Join-Path $BootstrapDir 'Scripts\python.exe'
+    Run-Checked $UiPython @('-m','pip','install','--disable-pip-version-check','textual>=8.2,<9','tomli>=2')
+    $UiArgs = @((Join-Path $PSScriptRoot 'installer\launch_tui.py'), '--install-dir', $InstallDir,
+                '--profile', $(if ($Compact) { 'compact' } else { 'auto' }),
+                '--language', $(if ($English) { 'en' } else { 'de' }))
+    if ($Autostart) { $UiArgs += '--autostart' }
+    # Stop transcript capture while the alternate-screen terminal application runs.
+    Stop-Transcript | Out-Null
+    & $UiPython @UiArgs
+    $UiResult = $LASTEXITCODE
+    Start-Transcript -Path $LogPath -Append | Out-Null
+    exit $UiResult
+}
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+function Stage([string]$Name) { Write-Output ('VOXD_EVENT {"stage":"' + $Name + '"}') }
+Stage 'preflight'
+Stage 'dependencies'
 $Venv = Join-Path $InstallDir 'venv'
 $PreviousPython = Join-Path $Venv 'Scripts\python.exe'
 if (Test-Path -LiteralPath $PreviousPython) {
@@ -54,15 +75,19 @@ if (Test-Path -LiteralPath $PreviousPython) {
 }
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Set-Content -LiteralPath (Join-Path $InstallDir 'voxd-install.marker') -Value 'voxd-per-user-v1'
+Stage 'environment'
 Run-Checked $Python @('-m','venv',$Venv)
 $EnvPython = Join-Path $Venv 'Scripts\python.exe'
 Run-Checked $EnvPython @('-m','pip','install','--upgrade','pip')
 $Wheel = Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'voxd-*.whl' | Select-Object -First 1
 $Package = if ($Wheel) { $Wheel.FullName } else { $PSScriptRoot }
+Stage 'application'
 Run-Checked $EnvPython @('-m','pip','install','--upgrade','--force-reinstall',$Package)
 $Profile = if ($Compact) { 'compact' } else { 'auto' }
 $Language = if ($English) { 'en' } else { 'de' }
+Stage 'models'
 Run-Checked $EnvPython @('-m','voxd.bootstrap','--apply','--profile',$Profile,'--language',$Language)
+Stage 'shortcuts'
 $Shell = New-Object -ComObject WScript.Shell
 $StartMenu = Join-Path ([Environment]::GetFolderPath('Programs')) 'voxd'
 New-Item -ItemType Directory -Force -Path $StartMenu | Out-Null

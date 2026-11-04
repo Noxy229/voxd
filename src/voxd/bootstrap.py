@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 
@@ -67,10 +68,14 @@ def main(argv=None) -> int:
             last = [-1]
             def progress(p):
                 percent = int(p.fraction * 100)
-                if percent // 10 != last[0]:
+                if percent != last[0]:
                     if sys.stdout is not None:
-                        print(f'{p.file_name}: {percent}%', flush=True)
-                    last[0] = percent // 10
+                        if os.environ.get('VOXD_INSTALL_EVENTS') == '1':
+                            print('VOXD_EVENT ' + json.dumps({'stage': 'models', 'file': p.file_name,
+                                  'fraction': p.fraction, 'bytes_per_sec': p.bytes_per_sec}), flush=True)
+                        else:
+                            print(f'{p.file_name}: {percent}%', flush=True)
+                    last[0] = percent
             provision(plan, args.language, progress)
             if sys.stdout is not None:
                 print('voxd installation ready. Models preload when the application starts.')
