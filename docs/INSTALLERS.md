@@ -34,16 +34,27 @@ shown as normal terminal output; the app is not yet installed. Actual system
 packages and application/model installation require the Start action. Neither
 installer supplies GPU drivers or modifies repository visibility.
 
-## Curl entry
+## Shared curl entry
 
-`curl -fsSL https://raw.githubusercontent.com/Noxy229/voxd/main/install.sh | bash`
-is implemented but **not yet publicly available**: the endpoint returned 404
-when checked. Push to a readable repository before advertising this command as
-live. The source archive and raw script use the same `main` branch. A locally
-saved script without a sibling source tree/wheel also fetches the payload.
-Interactive input is reopened from `/dev/tty`; noninteractive sessions require
-`--non-interactive`. Tests stub the network download and exercise the real pipe
-entry, archive extraction and forwarding of arguments without OS installation.
+The repository-root `install` file is a Bash/CMD polyglot. Both native entry
+commands in README use this URL:
+`https://raw.githubusercontent.com/Noxy229/voxd/main/install`.
+Linux Bash downloads the latest `.run` plus `SHA256SUMS`, verifies the digest,
+and runs the terminal UI. Git Bash/Cygwin detect Windows and dispatch to the
+same file in native CMD. Native Windows CMD downloads
+`installer/download_windows.ps1`, which validates architecture, retrieves the
+latest console EXE and checksum, and refuses a checksum mismatch before execution.
+
+The standard entry points use GitHub's `releases/latest/download` URLs. They
+must therefore have a published, non-prerelease release with the documented
+asset names. The source scripts remain usable for development. The older
+`install.sh` pipe entry also supports fetching a full source payload and reopening
+`/dev/tty`, but README's standard command now uses the release dispatcher.
+
+Tests exercise Linux release selection, checksum rejection, unsupported OS
+rejection, Git Bash dispatch, and source archive forwarding. Native CMD dispatch
+is additionally tested under Wine with a no-op test executable; it does not
+substitute for real Windows installation acceptance.
 
 ## Failure and cancellation
 
@@ -69,6 +80,5 @@ actual Textual widgets with explicitly labelled example hardware/progress.
 Real Windows Python/winget/DLL/microphone/SendInput behavior still needs a Windows
 acceptance test. Root-owned package manager and sudo caching behavior must be
 checked on target Linux distributions; no system-package installation is run
-on the development desktop. The curl endpoint is not remotely end-to-end tested
-because it is not published. The previous historical-author-email finding still
-applies before publishing existing Git history.
+on the development desktop. Published bootstrap scripts and release checksums are verified anonymously
+after release. Privacy audit and metadata cleanup are documented in RELEASE.md.

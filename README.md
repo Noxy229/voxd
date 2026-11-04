@@ -4,37 +4,54 @@ Offline dictation for Linux and Windows, with lightweight spelling correction.
 Speech recognition weights are downloaded during installation. Dictation and
 correction run locally afterwards.
 
-## Terminal installer
+## Installation
 
-The default installer is a keyboard-first full-screen terminal dashboard for
-Linux and Windows. It shows CPU/RAM/GPU detection, model selection, dictionary
-language and autostart choices alongside the current stage and live subprocess
-output. Tab/Shift+Tab changes focus, arrow keys and Enter select options, Space
-toggles checkboxes, S starts, R retries after a failure, and Q asks to cancel.
-On narrow terminals the panels stack and scroll; status and action buttons stay
-visible. Hardware detection and downloads do not block the UI.
+The standard installation opens a keyboard-first terminal UI, detects your
+operating system and hardware, and downloads the matching package from the
+[latest release](https://github.com/Noxy229/voxd/releases/latest). No account is
+needed. You can also download installers directly from
+[Releases](https://github.com/Noxy229/voxd/releases).
 
-### Linux / curl
-
-After these changes are pushed to a publicly readable repository, the entry is:
+### Standard command — Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Noxy229/voxd/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Noxy229/voxd/main/install | bash
 ```
 
-**Not live yet:** this URL returned HTTP 404 during local verification. Nothing
-has been pushed or made public. The pipeline entry and its payload forwarding
-are tested locally; a private/unpublished repository cannot serve anonymous curl.
-To use the current code immediately, run `./install.sh` from the checkout or
-execute the built `dist/linux/voxd-linux.run`.
+### Standard command — Windows PowerShell
 
-The curl script downloads the complete source archive and reconnects input to
-`/dev/tty` so piped installation still supports keyboard interaction. Only the
-small Python/Textual frontend is prepared before the dashboard opens. Remaining
-system packages, the application and speech weights install after pressing S.
-Python/venv itself may require a preliminary package-manager step if absent.
+```powershell
+curl.exe -fsSL https://raw.githubusercontent.com/Noxy229/voxd/main/install -o "$env:TEMP\voxd-install.cmd"
+if ($LASTEXITCODE -eq 0) { & "$env:TEMP\voxd-install.cmd" }
+```
 
-The dashboard lets you skip distribution packages when they already exist.
+Both commands use **the same bootstrap URL**. It detects Linux versus Windows,
+fetches the right release package and checks its SHA-256 checksum before running
+it. Linux uses Bash; native Windows uses CMD/PowerShell. `curl` downloads the
+bootstrap; the operating system's interpreter executes it. On Windows with Git
+Bash, the Linux-style command also detects Windows and dispatches to its native
+terminal installer. Windows packages currently support x64 only.
+
+The dashboard shows CPU/RAM/GPU detection, model selection, dictionary language
+and autostart choices alongside the current stage and live subprocess output.
+Tab/Shift+Tab changes focus, arrows and Enter select options, Space toggles
+checkboxes, S starts, R retries after failure, and Q requests cancellation.
+Panels stack on narrow terminals; status and action buttons remain visible.
+
+### Direct downloads / source installation
+
+- **Linux:** download `voxd-linux.run` from Releases, then run `bash voxd-linux.run`.
+- **Windows:** download `voxd-terminal-setup-x64.exe`, or extract
+  `voxd-terminal-installer.zip` and run `Install.cmd`.
+- **Source checkout:** run `./install.sh` on Linux, or `install.ps1` on Windows.
+
+Internet is needed for the initial package and speech-weight downloads.
+Minimal Python/venv/Textual bootstrapping happens before the dashboard opens;
+the application, remaining system packages and speech weights install after
+pressing S. On Linux, Python/venv itself may need a preliminary system-package
+step if absent. Models remain usable offline afterwards.
+
+The Linux dashboard can skip distribution packages when they already exist.
 Supported package managers: apt, pacman, dnf and zypper. Sudo authentication takes
 place on the real terminal; the password does not enter the log stream. System
 package installation is allowed to finish before cancellation. ydotoold/uinput
@@ -46,15 +63,15 @@ For automation, explicitly bypass the UI:
 ./install.sh --non-interactive --compact --no-system-deps
 ```
 
-`--compact`, `--english` and `--autostart` also preselect the interactive choices.
-The app environment is under `$XDG_DATA_HOME/voxd/app`, normally
+`--compact`, `--english` and `--autostart` also preselect interactive choices.
+The Linux app environment is under `$XDG_DATA_HOME/voxd/app`, normally
 `~/.local/share/voxd/app`. Start from the app menu or `~/.local/bin/voxd`.
 Uninstall using `~/.local/share/voxd/app/uninstall.sh` (adjust for XDG_DATA_HOME).
 Models/settings survive uninstall.
 
 ### Windows 10/11 x64
 
-Run **voxd-terminal-setup-x64.exe**, or extract **voxd-terminal-installer.zip**
+Run **voxd-terminal-setup-x64.exe** from Releases, or extract **voxd-terminal-installer.zip**
 and double-click **Install.cmd**. Both open the terminal installer; there are no
 Inno wizard pages in this path. Python 3.12 and the small Textual frontend are
 prepared per-user first if needed. All application packages, model downloads,
@@ -167,9 +184,8 @@ QT_QPA_PLATFORM=offscreen .venv/bin/pytest
 .venv/bin/python tools/build_linux_installer.py
 ```
 
-See [installer build/testing instructions](docs/INSTALLERS.md) and the earlier
-[release verification notes](docs/RELEASE.md). No repository was made public.
-The prior historical-author-email finding still applies before publication.
+See [installer build/testing instructions](docs/INSTALLERS.md) and the
+[release verification notes](docs/RELEASE.md).
 
 ## License
 

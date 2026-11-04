@@ -1,6 +1,7 @@
 # Earlier release verification — 2026-11-04
 
-This report describes commit d6ab71e. The newer dictionary defaults and installers
+The model/Qt measurements below describe the earlier implementation before the
+dictionary-only default. The newer dictionary defaults and installers
 are documented in [INSTALLERS.md](INSTALLERS.md); Qwen is no longer the default.
 
 Implemented and locally checked; not a blanket certification for every desktop.
@@ -42,11 +43,18 @@ captures. README claims and install commands were corrected; personal repository
 links were removed from the downloader and installation instructions. The MIT
 copyright notice remains required attribution, including its public handle.
 
-**One non-noreply author email remains in historical commit metadata.** Publishing
-this Git history would expose it. History was not rewritten or pushed. For a
-public release without that metadata, start a fresh repository from the source
-export, or deliberately rewrite the existing history and coordinate affected
-clones. Do not publish the existing history as anonymized.
+Before the first public release, reachable author/committer metadata was
+normalized to the project's public GitHub noreply identity. A private local
+Git bundle retains the pre-public history outside the repository. Source and
+reachable historical text were scanned for credentials, private-key markers,
+known private identity addresses and personal paths; example test addresses
+and the MIT copyright attribution are intentional.
+
+The release contains Linux and Windows terminal installers plus SHA256SUMS.
+The checksum guards detect damaged/mismatched assets; they are not code signing.
+This review does not prove that every possible secret pattern is absent.
+GitHub may retain old unreferenced objects after a history update; the audit
+covers the refs and assets published for this release.
 
 ## Remaining acceptance work
 
@@ -61,4 +69,4 @@ performed during automated verification.
 
 Windows hardware validation, a native Plasma layer-shell overlay, clipboard
 MIME preservation, cryptographically pinned model downloads and broad desktop
-acceptance remain open. The repository has not been made public or pushed.
+acceptance remain open. The first public release publishes the reviewed source and installers.

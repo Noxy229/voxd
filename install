@@ -1,0 +1,21 @@
+:; # voxd universal entry: Bash on Linux/Git Bash, CMD on native Windows.
+:; set -euo pipefail
+:; if [[ "${1:-}" == --help ]]; then printf '%s\n' 'voxd: detect Linux/Windows and open the terminal installer.' 'Linux: curl -fsSL https://raw.githubusercontent.com/Noxy229/voxd/main/install | bash' 'Windows PowerShell: download this URL as voxd-install.cmd and execute it.'; exit 0; fi
+:; case "$(uname -s)" in Linux*) platform=linux ;; MINGW*|MSYS*|CYGWIN*) platform=windows ;; *) printf 'Unsupported OS. voxd supports Linux and Windows.\n' >&2; exit 2 ;; esac
+:; download_dir="$(mktemp -d)"
+:; trap 'rm -rf -- "$download_dir"' EXIT
+:; if [[ "$platform" == windows ]]; then curl --fail --location --retry 3 --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/Noxy229/voxd/main/install -o "$download_dir/voxd-install.cmd"; cmd.exe /d /c "$(cygpath -w "$download_dir/voxd-install.cmd")"; exit $?; fi
+:; release_base='https://github.com/Noxy229/voxd/releases/latest/download'
+:; printf 'voxd: Linux erkannt. Lade Terminal-Installer …\n'
+:; curl --fail --location --retry 3 --proto '=https' --tlsv1.2 "$release_base/voxd-linux.run" -o "$download_dir/voxd-linux.run"
+:; curl --fail --location --retry 3 --proto '=https' --tlsv1.2 "$release_base/SHA256SUMS" -o "$download_dir/SHA256SUMS"
+:; checksum="$(awk '$2 == "voxd-linux.run" {print}' "$download_dir/SHA256SUMS")"
+:; if [[ -z "$checksum" || "$checksum" == *$'\n'* ]]; then printf 'Missing or ambiguous Linux checksum.\n' >&2; exit 1; fi
+:; if ! ( cd "$download_dir"; printf '%s\n' "$checksum" | sha256sum --check --status ); then printf 'Checksum mismatch; installer was not run.\n' >&2; exit 1; fi
+:; if ( : </dev/tty ) 2>/dev/null; then bash "$download_dir/voxd-linux.run" "$@" </dev/tty; else bash "$download_dir/voxd-linux.run" "$@"; fi
+:; exit $?
+@echo off
+setlocal
+set "VOXD_INSTALL_MODE=%~1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; if($env:VOXD_INSTALL_MODE -eq '--help'){Write-Output 'voxd: Windows terminal installer; downloads and verifies the latest release.';exit 0}; if($env:VOXD_INSTALL_MODE){throw 'Unknown argument; run without arguments for the interactive installer.'}; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $script=Join-Path ([IO.Path]::GetTempPath()) ('voxd-download-'+[Guid]::NewGuid().ToString('N')+'.ps1'); try{Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/Noxy229/voxd/main/installer/download_windows.ps1' -OutFile $script; & $script; exit $LASTEXITCODE}finally{Remove-Item -LiteralPath $script -Force -ErrorAction SilentlyContinue}"
+exit /b %ERRORLEVEL%
