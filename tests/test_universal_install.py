@@ -65,7 +65,7 @@ def test_git_bash_routes_to_native_windows_entry(tmp_path):
     cygpath = tmp_path / 'cygpath'
     cygpath.write_text('#!/bin/bash\nprintf "%s\\n" "$2"\n')
     cmd = tmp_path / 'cmd.exe'
-    cmd.write_text('#!/bin/bash\nprintf "WINDOWS_BACKEND\\n"\n')
+    cmd.write_text('#!/bin/bash\n[[ "$MSYS_NO_PATHCONV" == 1 && "$MSYS2_ARG_CONV_EXCL" == \'*\' ]] || exit 8\nprintf "WINDOWS_BACKEND\\n"\n')
     for file in (curl, cygpath, cmd):
         file.chmod(0o755)
     result = subprocess.run(['bash', str(ENTRY)], text=True, capture_output=True, env=env)

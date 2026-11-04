@@ -4,7 +4,7 @@
 :; case "$(uname -s)" in Linux*) platform=linux ;; MINGW*|MSYS*|CYGWIN*) platform=windows ;; *) printf 'Unsupported OS. voxd supports Linux and Windows.\n' >&2; exit 2 ;; esac
 :; download_dir="$(mktemp -d)"
 :; trap 'rm -rf -- "$download_dir"' EXIT
-:; if [[ "$platform" == windows ]]; then curl --fail --location --retry 3 --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/Noxy229/voxd/main/install -o "$download_dir/voxd-install.cmd"; cmd.exe /d /c "$(cygpath -w "$download_dir/voxd-install.cmd")"; exit $?; fi
+:; if [[ "$platform" == windows ]]; then curl --fail --location --retry 3 --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/Noxy229/voxd/main/install -o "$download_dir/voxd-install.cmd"; MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' cmd.exe /d /s /c "\"$(cygpath -w "$download_dir/voxd-install.cmd")\""; exit $?; fi
 :; release_base='https://github.com/Noxy229/voxd/releases/latest/download'
 :; printf 'voxd: Linux erkannt. Lade Terminal-Installer …\n'
 :; curl --fail --location --retry 3 --proto '=https' --tlsv1.2 "$release_base/voxd-linux.run" -o "$download_dir/voxd-linux.run"
